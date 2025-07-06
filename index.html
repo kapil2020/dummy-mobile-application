@@ -1,0 +1,3010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DRUM - Dynamic Route Optimization for Urban Mobility</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <!-- Leaflet.js for interactive maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, deleteDoc, onSnapshot, collection, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase variables
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.userId = null;
+        window.isAuthReady = false; // Flag to indicate if auth state is ready
+
+        // Expose Firestore functions to global scope for use in main script
+        window.getFirestore = getFirestore;
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.onSnapshot = onSnapshot;
+        window.query = query;
+        window.getDocs = getDocs; // Expose getDocs as well for saved routes check
+        window.signOut = signOut; // Expose signOut for logout functionality
+
+        // Function to load and render saved routes from Firestore - now globally accessible
+        window.loadSavedRoutes = function() {
+            if (!window.isAuthReady || !window.userId || !window.db) {
+                console.warn("Firestore not ready for loading saved routes. Retrying in 1 second.");
+                setTimeout(window.loadSavedRoutes, 1000); // Retry after 1 second
+                return;
+            }
+
+            const routesCollectionRef = collection(window.db, `artifacts/${__app_id}/users/${window.userId}/savedRoutes`);
+            onSnapshot(routesCollectionRef, (snapshot) => {
+                window.savedRoutes = []; // Clear current array
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    // Parse path back to array if it was stored as a string
+                    if (data.path && typeof data.path === 'string') {
+                        try {
+                            data.path = JSON.parse(data.path);
+                        } catch (e) {
+                            console.error("Error parsing path for saved route:", e);
+                        }
+                    }
+                    window.savedRoutes.push({ id: doc.id, ...data });
+                });
+                console.log("Saved Routes loaded from Firestore:", window.savedRoutes);
+                // Only render if on the saved routes screen
+                if (document.getElementById('screen4').classList.contains('active')) {
+                    window.renderSavedRoutes(); // Call the global render function
+                }
+            }, (error) => {
+                console.error("Error listening to saved routes:", error);
+                window.showToast('Error loading saved routes.'); // Call the global toast function
+            });
+        };
+
+        // Function to load and render trip history from Firestore
+        window.loadTripHistory = function() {
+            if (!window.isAuthReady || !window.userId || !window.db) {
+                console.warn("Firestore not ready for loading trip history. Retrying in 1 second.");
+                setTimeout(window.loadTripHistory, 1000);
+                return;
+            }
+
+            const historyCollectionRef = collection(window.db, `artifacts/${__app_id}/users/${window.userId}/tripHistory`);
+            onSnapshot(historyCollectionRef, (snapshot) => {
+                window.tripHistory = []; // Clear current array
+                snapshot.forEach((doc) => {
+                    const data = doc.data();
+                    // Parse path back to array if it was stored as a string
+                    if (data.path && typeof data.path === 'string') {
+                        try {
+                            data.path = JSON.parse(data.path);
+                        } catch (e) {
+                            console.error("Error parsing path for trip history:", e);
+                        }
+                    }
+                    window.tripHistory.push({ id: doc.id, ...data });
+                });
+                // Sort by timestamp descending
+                window.tripHistory.sort((a, b) => b.timestamp - a.timestamp);
+                console.log("Trip History loaded from Firestore:", window.tripHistory);
+                if (document.getElementById('screen7').classList.contains('active')) {
+                    window.renderTripHistory();
+                }
+                // Update profile stats based on history
+                window.updateProfileStats();
+            }, (error) => {
+                console.error("Error listening to trip history:", error);
+                window.showToast('Error loading trip history.');
+            });
+        };
+
+
+        // Initialize Firebase and set up auth listener
+        document.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+                window.firebaseApp = initializeApp(firebaseConfig);
+                window.db = getFirestore(window.firebaseApp);
+                window.auth = getAuth(window.firebaseApp);
+
+                onAuthStateChanged(window.auth, async (user) => {
+                    if (user) {
+                        window.userId = user.uid;
+                        console.log("Firebase: Authenticated with UID:", window.userId);
+                    } else {
+                        // If no user, try to sign in with custom token or anonymously
+                        if (initialAuthToken) {
+                            try {
+                                const userCredential = await signInWithCustomToken(window.auth, initialAuthToken);
+                                window.userId = userCredential.user.uid;
+                                console.log("Firebase: Signed in with custom token:", window.userId);
+                            } catch (error) {
+                                console.error("Firebase: Error signing in with custom token:", error);
+                                // Fallback to anonymous if custom token fails
+                                try {
+                                    const userCredential = await signInAnonymously(window.auth);
+                                    window.userId = userCredential.user.uid;
+                                    console.log("Firebase: Signed in anonymously after token failure:", window.userId);
+                                } catch (anonError) {
+                                    console.error("Firebase: Error signing in anonymously:", anonError);
+                                    window.userId = crypto.randomUUID(); // Fallback to a random ID if anonymous fails
+                                    console.warn("Firebase: Using random UUID as userId due to auth failure:", window.userId);
+                                }
+                            }
+                        } else {
+                            // No initial token, sign in anonymously
+                            try {
+                                const userCredential = await signInAnonymously(window.auth);
+                                window.userId = userCredential.user.uid;
+                                console.log("Firebase: Signed in anonymously:", window.userId);
+                            } catch (error) {
+                                console.error("Firebase: Error signing in anonymously:", error);
+                                window.userId = crypto.randomUUID(); // Fallback to a random ID
+                                console.warn("Firebase: Using random UUID as userId due to auth failure:", window.userId);
+                            }
+                        }
+                    }
+                    window.isAuthReady = true; // Auth state is now determined
+                    console.log("Firebase: Auth state ready. User ID:", window.userId);
+                    // Now that auth is ready, load saved routes and trip history
+                    window.loadSavedRoutes();
+                    window.loadTripHistory();
+                });
+
+            } catch (e) {
+                console.error("Firebase initialization failed:", e);
+                // Fallback to a random ID if Firebase init fails
+                window.userId = crypto.randomUUID();
+                window.isAuthReady = true;
+                console.warn("Firebase: Using random UUID as userId due to initialization failure:", window.userId);
+                // Even if Firebase fails, try to load saved routes (though it won't be persistent)
+                window.loadSavedRoutes();
+                window.loadTripHistory();
+            }
+        });
+    </script>
+    <style>
+        /* Custom CSS Variables for consistent theming */
+        :root {
+            --primary-green: #10B981;
+            --dark-green: #047857;
+            --light-green: #D1FAE5;
+            --accent-yellow: #F59E0B;
+            --accent-blue: #3B82F6;
+            --accent-red: #EF4444;
+            /* Gemini-inspired colors - keeping them defined but not used in footer */
+            --gemini-blue: #4285F4;
+            --gemini-green: #34A853;
+            --gemini-yellow: #FBBC04;
+            --gemini-red: #EA4335;
+            --gemini-dark-blue: #1A73E8;
+            --gemini-dark-green: #0D652D;
+            --gemini-dark-purple: #673AB7;
+        }
+        
+        /* Body styling for centering the mobile frame */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 10px; /* Reduced padding for more screen real estate */
+            overflow: hidden;
+            box-sizing: border-box; /* Include padding in element's total width and height */
+        }
+        
+        /* Mobile frame container styling (iPhone-like responsiveness) */
+        .mobile-frame {
+            width: 95vw; /* Use viewport width for responsiveness */
+            max-width: 375px; /* Max width for larger screens */
+            height: 95vh; /* Use viewport height for responsiveness */
+            max-height: 667px; /* Max height for larger screens */
+            aspect-ratio: 375 / 667; /* Maintain iPhone aspect ratio */
+            background-color: #fff;
+            border-radius: 40px; /* Rounded corners for iPhone look */
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+            position: relative;
+            border: 12px solid #111827; /* Frame border */
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex; /* Ensure inner content flexes */
+            flex-direction: column; /* Stack content vertically */
+        }
+        
+        /* Hover effect for mobile frame */
+        .mobile-frame:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 30px 60px -10px rgba(0, 0, 0, 0.35);
+        }
+        
+        /* Notch design for mobile frame */
+        .notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 140px;
+            height: 30px;
+            background-color: #111827;
+            border-bottom-left-radius: 15px;
+            border-bottom-right-radius: 15px;
+            z-index: 20;
+        }
+        
+        /* Status bar styling (time, signal, battery) */
+        .status-bar {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 44px;
+            background: linear-gradient(to bottom, #111827, #1F2937);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 10;
+            border-top-left-radius: 32px;
+            border-top-right-radius: 32px;
+        }
+        
+        /* Screen container styling for transitions */
+        .screen {
+            width: 100%;
+            height: 100%;
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            justify-content: space-between;
+            position: absolute;
+            top: 0;
+            left: 0;
+            transition: transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.4s ease-out;
+            transform: translateX(100%); /* Off-screen to the right initially */
+            opacity: 0;
+            overflow: hidden;
+        }
+        
+        /* Active screen styling */
+        .screen.active {
+            display: flex;
+            transform: translateX(0); /* Slides into view */
+            opacity: 1;
+        }
+        
+        /* Header styling */
+        .header {
+            background: linear-gradient(135deg, var(--primary-green), var(--dark-green));
+            color: white;
+            padding: 16px 20px;
+            padding-top: 60px; /* Space for status bar */
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 5;
+        }
+        
+        /* Footer styling */
+        .footer {
+            background: white;
+            border-top: 1px solid #E5E7EB;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            z-index: 5;
+        }
+        
+        /* Primary button styling */
+        .button-primary {
+            background: linear-gradient(135deg, var(--primary-green), var(--dark-green));
+            color: white;
+            font-weight: 600;
+            padding: 14px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        /* Primary button hover effects */
+        .button-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(16, 185, 129, 0.4);
+        }
+        
+        /* Primary button active effects */
+        .button-primary:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+        
+        /* Secondary button styling */
+        .button-secondary {
+            background: white;
+            color: #4B5563;
+            border: 1px solid #D1D5DB;
+            font-weight: 500;
+            padding: 12px 20px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        /* Secondary button hover effects */
+        .button-secondary:hover {
+            background: #F3F4F6;
+            transform: translateY(-1px);
+        }
+        
+        /* Input field styling */
+        .input-field {
+            width: 100%;
+            padding: 14px 16px 14px 48px; /* Left padding for icon */
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            font-size: 15px;
+            transition: all 0.2s ease;
+            background-color: #F9FAFB;
+            color: #1F2937; /* Ensure text is dark and readable */
+        }
+        
+        /* Input field focus effects (Gemini-inspired blue) */
+        .input-field:focus {
+            outline: none;
+            border-color: var(--gemini-blue);
+            box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.3); /* Blue shadow */
+            background-color: white;
+        }
+        
+        /* Input icon positioning */
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9CA3AF;
+            font-size: 18px;
+        }
+        
+        /* Card styling for route options */
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            border: 1px solid #E5E7EB;
+            transition: all 0.3s ease;
+            margin-bottom: 12px;
+            cursor: pointer; /* Indicate interactivity */
+        }
+        
+        /* Card hover effects */
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        /* Selected card styling */
+        .card.selected {
+            border: 2px solid var(--primary-green);
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.2);
+        }
+        
+        /* Map container styling */
+        .map-container {
+            width: 100%;
+            height: 240px;
+            border-radius: 14px;
+            overflow: hidden;
+            position: relative;
+            background-color: #E5E7EB; /* Placeholder background */
+            margin-bottom: 20px;
+        }
+        
+        /* Map image styling (now used for Leaflet map div) */
+        .map-image {
+            width: 100%;
+            height: 100%;
+            transition: opacity 0.5s ease;
+            z-index: 6; /* Ensure map is below markers/overlays */
+            position: relative;
+        }
+        
+        /* Map overlay for text on map */
+        .map-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+            padding: 16px;
+            color: white;
+            z-index: 1000; /* Increased z-index for overlays */
+        }
+        
+        /* Route marker (if used on map) */
+        .route-marker {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid white;
+            z-index: 7; /* Above map image */
+        }
+        
+        /* Route line (if used on map) */
+        .route-line {
+            position: absolute;
+            height: 4px;
+            border-radius: 2px;
+            transform-origin: left center;
+            z-index: 7; /* Above map image */
+        }
+        
+        /* Badge styling */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        /* Specific badge colors */
+        .badge-green {
+            background-color: var(--light-green);
+            color: var(--dark-green);
+        }
+        
+        .badge-yellow {
+            background-color: #FEF3C7;
+            color: #92400E;
+        }
+        
+        .badge-blue {
+            background-color: #DBEAFE;
+            color: #1E40AF;
+        }
+        
+        .badge-red {
+            background-color: #FEE2E2;
+            color: #991B1B;
+        }
+        
+        /* Progress bar styling */
+        .progress-bar {
+            height: 6px;
+            border-radius: 3px;
+            background-color: #E5E7EB;
+            overflow: hidden;
+        }
+        
+        /* Progress fill styling */
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-green), var(--dark-green));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        
+        /* Vehicle option card styling */
+        .vehicle-option {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            background-color: #F9FAFB;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        /* Selected vehicle option styling */
+        .vehicle-option.selected {
+            border-color: var(--primary-green);
+            background-color: var(--light-green);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+        }
+        
+        /* Vehicle icon styling */
+        .vehicle-icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+        
+        /* Priority option card styling */
+        .priority-option {
+            display: flex;
+            align-items: center;
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            background-color: #F9FAFB;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        /* Selected priority option styling */
+        .priority-option.selected {
+            border-color: var(--primary-green);
+            background-color: var(--light-green);
+        }
+        
+        /* Priority icon styling */
+        .priority-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            color: var(--primary-green);
+        }
+        
+        /* Eco badge styling within priority options */
+        .eco-badge {
+            margin-left: 8px;
+            background-color: var(--light-green);
+            color: var(--dark-green);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        /* Route details section styling */
+        .route-details {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #6B7280;
+        }
+        
+        /* Individual route detail item styling */
+        .route-detail-item {
+            display: flex;
+            align-items: center;
+        }
+        
+        /* Route detail icon styling */
+        .route-detail-icon {
+            margin-right: 4px;
+            color: #9CA3AF;
+        }
+        
+        /* Impact meter styling */
+        .impact-meter {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background-color: #E5E7EB;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        /* Impact fill styling */
+        .impact-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-green), var(--dark-green));
+            border-radius: 4px;
+        }
+        
+        /* Navigation tab styling */
+        .nav-tab {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 0;
+            color: #9CA3AF;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        /* Active navigation tab styling */
+        .nav-tab.active {
+            color: var(--primary-green);
+        }
+        
+        /* Navigation icon styling */
+        .nav-icon {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+        
+        /* AQI indicator styling on map */
+        .aqi-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            z-index: 1000; /* Above everything */
+        }
+        
+        /* AQI dot styling */
+        .aqi-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        
+        /* Time pill styling on map */
+        .time-pill {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 1000; /* Above everything */
+        }
+        
+        /* Loading spinner animation */
+        .loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        /* Slide up animation for cards */
+        .slide-up {
+            animation: slideUp 0.5s ease-out forwards;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        /* Pulse animation for buttons */
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        /* Traffic light indicator dots */
+        .traffic-light {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        
+        .traffic-green { background-color: #10B981; }
+        .traffic-yellow { background-color: #F59E0B; }
+        .traffic-red { background-color: #EF4444; }
+
+        /* Toast message styles */
+        .toast-message {
+            position: absolute;
+            bottom: 80px; /* Above the footer */
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            z-index: 100;
+            white-space: nowrap;
+        }
+        .toast-message.show {
+            opacity: 1;
+        }
+
+        /* Hotspot styles */
+        /* These styles are now for Leaflet markers, not direct HTML elements */
+        /* Keeping them for reference if custom HTML markers are used */
+        /*
+        .hotspot {
+            position: absolute;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: white;
+            opacity: 0.8;
+            transition: all 0.5s ease;
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+            z-index: 7;
+        }
+        .hotspot.aqi-good { background-color: #10B981; }
+        .hotspot.aqi-moderate { background-color: #F59E0B; }
+        .hotspot.aqi-poor { background-color: #EF4444; }
+        .hotspot.traffic-light { border: 2px solid #10B981; }
+        .hotspot.traffic-moderate { border: 2px solid #F59E0B; }
+        .hotspot.traffic-heavy { border: 2px solid #EF4444; }
+        */
+
+        /* Autocomplete suggestions styling */
+        .autocomplete-suggestions {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+            width: calc(100% - 40px); /* Adjust based on padding */
+            left: 20px; /* Match screen padding */
+            right: 20px; /* Match screen padding */
+            z-index: 50;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-top: 5px;
+        }
+        .autocomplete-suggestion-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 15px;
+            color: #374151;
+        }
+        .autocomplete-suggestion-item:hover {
+            background-color: #F3F4F6;
+        }
+
+        /* Live Navigation Route Line */
+        .nav-route-line {
+            position: absolute;
+            background: rgba(var(--primary-green), 0.7); /* Greenish semi-transparent */
+            height: 6px;
+            border-radius: 3px;
+            z-index: 2; /* Between map and marker */
+            pointer-events: none; /* Don't block clicks */
+            animation: drawLine 5s linear forwards; /* Simulate drawing the line */
+        }
+
+        @keyframes drawLine {
+            from { width: 0; }
+            to { width: 100%; }
+        }
+
+        /* New styles */
+        .route-visualization {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+        }
+        
+        .route-step {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--accent-blue);
+            border: 2px solid white;
+            z-index: 5;
+        }
+        
+        .route-path {
+            position: absolute;
+            height: 4px;
+            background-color: var(--accent-blue);
+            border-radius: 2px;
+            transform-origin: left center;
+            z-index: 4;
+        }
+        
+        .route-info-window {
+            position: absolute;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-size: 12px;
+            z-index: 10;
+            max-width: 150px;
+        }
+        
+        .impact-chart {
+            display: flex;
+            align-items: flex-end;
+            height: 80px;
+            margin-top: 15px;
+        }
+        
+        .impact-bar {
+            flex: 1;
+            margin: 0 4px;
+            background: linear-gradient(to top, var(--primary-green), var(--dark-green));
+            border-radius: 4px 4px 0 0;
+            position: relative;
+        }
+        
+        .impact-label {
+            position: absolute;
+            bottom: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10px;
+            color: #6B7280;
+        }
+        
+        .impact-value {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .traffic-legend {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+        }
+        
+.legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+        
+        .weather-icon {
+            font-size: 24px;
+            margin-right: 8px;
+            color: var(--accent-blue);
+        }
+        
+        .saved-route-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        
+        .action-button {
+            flex: 1;
+            padding: 8px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            margin: 0 4px;
+            cursor: pointer;
+        }
+        
+        .action-button.share {
+            background-color: #DBEAFE;
+            color: #1E40AF;
+        }
+        
+        .action-button.navigate {
+            background-color: var(--light-green);
+            color: var(--dark-green);
+        }
+        
+        .action-button.delete {
+            background-color: #FEE2E2;
+            color: #991B1B;
+        }
+        
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: var(--accent-red);
+            color: white;
+            font-size: 10px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .notification-item {
+            display: flex;
+            padding: 12px;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        
+        .notification-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        
+        .notification-info {
+            flex: 1;
+        }
+        
+        .notification-time {
+            font-size: 11px;
+            color: #9CA3AF;
+        }
+        
+        .profile-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            text-align: center;
+            /* Added for animation */
+            opacity: 0;
+            transform: translateY(20px);
+            animation: slideUp 0.5s ease-out forwards;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 5px 0;
+            color: var(--dark-green);
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #6B7280;
+        }
+        
+        .carbon-savings {
+            position: relative;
+            height: 120px;
+            margin: 20px 0;
+        }
+        
+        .carbon-tree {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 40px;
+            color: var(--primary-green);
+        }
+        
+        .carbon-value {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--dark-green);
+        }
+        
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: var(--primary-green);
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .forecast-graph-container {
+            position: relative;
+            width: 100%;
+            height: 150px; /* Increased height for better visualization */
+            margin-top: 10px;
+            margin-bottom: 20px;
+        }
+
+        .forecast-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        /* Comparison Table Styles */
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 14px;
+            text-align: left;
+        }
+        .comparison-table th, .comparison-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        .comparison-table th {
+            background-color: #F3F4F6;
+            font-weight: 600;
+            color: #4B5563;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .comparison-table tbody tr:hover {
+            background-color: #F9FAFB;
+        }
+        .comparison-table td:first-child {
+            font-weight: 500;
+            color: #1F2937;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mobile-frame">
+        <div class="notch"></div>
+        <div class="status-bar">
+            <span id="current-time">9:41 AM</span>
+            <div class="flex items-center space-x-2">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-full"></i>
+            </div>
+        </div>
+
+        <!-- Screen 0: Welcome Screen -->
+        <div id="screen0" class="screen active" style="transform: translateX(0); opacity: 1;">
+            <div class="flex-1 flex flex-col items-center justify-center text-center p-5 bg-gradient-to-br from-green-500 to-green-700 text-white">
+                <div class="relative mb-8">
+                    <i class="fas fa-leaf text-8xl mb-4 animate-bounce" style="animation-duration: 2s;"></i>
+                    <div class="absolute -inset-4 bg-green-400 rounded-full opacity-20 blur-lg"></div>
+                </div>
+                <h1 class="text-4xl font-extrabold mb-4 drop-shadow-lg">DRUM</h1>
+                <p class="text-xl mb-8 font-light max-w-xs">Dynamic Route Planning for Urban Green Mobility</p>
+                <button class="button-primary text-xl px-8 py-4 animate-pulse flex items-center" onclick="window.showScreen('screen1')">
+                    Get Started <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+            <!-- Reverted and sized-down Footer for Landing Page -->
+            <div class="footer bg-gradient-to-br from-green-500 to-green-700 text-white p-4 text-center text-sm rounded-t-3xl">
+                <p>Developed by IIT Kharagpur Research Team</p>
+                <p class="text-gray-200 mt-1">Reducing urban emissions one route at a time</p>
+            </div>
+        </div>
+
+        <!-- Screen 1: Home/Map View -->
+        <div id="screen1" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen5')">
+                        <i class="fas fa-user"></i>
+                    </button>
+                    <h1 class="text-xl font-bold flex items-center">
+                        <i class="fas fa-leaf mr-2"></i> DRUM
+                    </h1>
+                    <button class="text-white text-xl relative" onclick="window.showScreen('screen6')">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-badge">3</span>
+                    </button>
+                </div>
+                
+                <div class="mt-4 relative">
+                    <i class="input-icon fas fa-location-dot"></i>
+                    <!-- Improved "Where to?" line text -->
+                    <input type="text" placeholder="Where are you heading today?" class="input-field pl-12" id="destination-input" onkeyup="window.showSuggestions(this, 'suggestions1')" onfocus="window.showSuggestions(this, 'suggestions1')" onblur="window.hideSuggestions('suggestions1')">
+                    <div id="suggestions1" class="autocomplete-suggestions hidden"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="map-container relative">
+                    <!-- Leaflet Map Container -->
+                    <div id="leaflet-map" class="map-image"></div>
+                    
+                    <div class="map-overlay">
+                        <div class="flex justify-between items-end">
+                            <div>
+                                <div class="text-white font-semibold">Current Location</div>
+                                <div class="text-sm text-gray-200">Connaught Place, Delhi</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="flex items-center justify-end">
+                                    <span class="traffic-light traffic-yellow" id="live-traffic-dot"></span>
+                                    <span class="text-xs text-gray-200" id="live-traffic-text">Live Traffic: Moderate</span>
+                                </div>
+                                <div class="text-white font-bold text-lg" id="live-travel-time">45 min</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="aqi-indicator">
+                        <span class="aqi-dot bg-orange-500" id="live-aqi-dot"></span>
+                        <span>Live AQI: <span id="live-aqi-value">125</span></span>
+                    </div>
+                    <div class="time-pill">Live</div>
+                </div>
+
+                <button class="button-primary w-full mb-6 flex items-center justify-center" onclick="window.showScreen('screen2')">
+                    <i class="fas fa-route mr-2"></i> Plan Eco Route
+                </button>
+
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-6">
+                    <h3 class="font-bold text-lg mb-3 flex items-center">
+                        <i class="fas fa-chart-line text-blue-500 mr-2"></i> 6-Hour Forecast
+                    </h3>
+                    
+                    <!-- Canvas for 6-Hour Forecast Plot -->
+                    <div class="forecast-graph-container">
+                        <canvas id="forecast-chart" class="forecast-canvas"></canvas>
+                    </div>
+                    
+                    <div class="traffic-legend">
+                        <div class="legend-item">
+                            <div class="legend-color traffic-green"></div>
+                            <span>Light Traffic</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color traffic-yellow"></div>
+                            <span>Moderate Traffic</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color traffic-red"></div>
+                            <span>Heavy Traffic</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color bg-blue-500"></div>
+                            <span>AQI</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                    <h3 class="font-bold text-lg mb-3 flex items-center">
+                        <i class="fas fa-seedling text-green-500 mr-2"></i> Your Green Impact
+                    </h3>
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm text-gray-600">This week's CO₂ savings</span>
+                        <span class="font-bold text-green-600">2.8 kg</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 55%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>0 kg</span>
+                        <span>5 kg goal</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-4 mt-4">
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">9</div>
+                            <div class="text-xs text-gray-500">Eco Trips</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">35 km</div>
+                            <div class="text-xs text-gray-500">Distance</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">110</div>
+                            <div class="text-xs text-gray-500">Avg AQI</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <div class="flex justify-around py-3">
+                    <button class="nav-tab active" onclick="window.showScreen('screen1')">
+                        <i class="nav-icon fas fa-map-marked-alt"></i>
+                        <span>Map</span>
+                    </button>
+                    <button class="nav-tab" onclick="window.showScreen('screen4')">
+                        <i class="nav-icon fas fa-star"></i>
+                        <span>Saved</span>
+                    </button>
+                    <button class="nav-tab" onclick="window.showScreen('screen7')">
+                        <i class="nav-icon fas fa-history"></i>
+                        <span>History</span>
+                    </button>
+                    <button class="nav-tab" onclick="window.showScreen('screen8')">
+                        <i class="nav-icon fas fa-user"></i>
+                        <span>Profile</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen 2: Route Input & Preferences -->
+        <div id="screen2" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Route Preferences</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Start Location</label>
+                    <div class="relative">
+                        <i class="input-icon fas fa-location-dot"></i>
+                        <input type="text" class="input-field pl-12" value="Current Location" id="start-location-input">
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Destination</label>
+                    <div class="relative">
+                        <i class="input-icon fas fa-map-marker-alt"></i>
+                        <input type="text" class="input-field pl-12" id="destination-input-2" onkeyup="window.showSuggestions(this, 'suggestions2')" onfocus="window.showSuggestions(this, 'suggestions2')" onblur="window.hideSuggestions('suggestions2')">
+                        <div id="suggestions2" class="autocomplete-suggestions hidden"></div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Vehicle Type</label>
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="vehicle-option selected" onclick="window.selectVehicle(this, 'car')" data-vehicle="car">
+                            <div class="vehicle-icon">🚗</div>
+                            <div class="font-medium">Car</div>
+                            <div class="text-xs text-gray-500 mt-1">Petrol/Diesel</div>
+                        </div>
+                        <div class="vehicle-option" onclick="window.selectVehicle(this, 'two_wheeler')" data-vehicle="two_wheeler">
+                            <div class="vehicle-icon">🏍️</div>
+                            <div class="font-medium">Two Wheeler</div>
+                            <div class="text-xs text-gray-500 mt-1">150cc</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Route Priority</label>
+                    <div class="space-y-3">
+                        <div class="priority-option selected" onclick="window.selectPriorityOption(this, 'fastest')" data-priority="fastest">
+                            <div class="priority-icon">
+                                <i class="fas fa-bolt"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">Fastest Route</div>
+                                <div class="text-xs text-gray-500">Least travel time</div>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="window.selectPriorityOption(this, 'shortest')" data-priority="shortest">
+                            <div class="priority-icon">
+                                <i class="fas fa-route"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">Shortest Distance</div>
+                                <div class="text-xs text-gray-500">Fewest kilometers</div>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="window.selectPriorityOption(this, 'leap')" data-priority="leap">
+                            <div class="priority-icon">
+                                <i class="fas fa-wind"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">LEAP Route</div>
+                                <div class="text-xs text-gray-500">Least air pollution</div>
+                                <span class="eco-badge">ECO</span>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="window.selectPriorityOption(this, 'lecr')" data-priority="lecr">
+                            <div class="priority-icon">
+                                <i class="fas fa-battery-three-quarters"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">LECR Route</div>
+                                <div class="text-xs text-gray-500">Least energy use</div>
+                                <span class="eco-badge">ECO</span>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="window.selectPriorityOption(this, 'suggested')" data-priority="suggested">
+                            <div class="priority-icon">
+                                <i class="fas fa-star"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">Suggested Route</div>
+                                <div class="text-xs text-gray-500">Balanced for Time & Impact</div>
+                                <span class="eco-badge">Optimal</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 rounded-xl p-4 mb-6">
+                    <div class="flex items-start">
+                        <div class="bg-blue-100 p-2 rounded-lg mr-3">
+                            <i class="fas fa-cloud-sun text-blue-500"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-medium text-blue-800">Weather & Traffic Forecast</h4>
+                            <p class="text-sm text-blue-600">Clear skies with moderate traffic expected. Avoid peak hours for smoother travel.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-primary w-full pulse" onclick="window.findRoutes()">
+                    <span id="find-routes-text">Find Eco Routes</span>
+                    <span id="finding-routes" class="hidden flex items-center justify-center">
+                        <i class="fas fa-spinner fa-spin mr-2"></i> Finding routes...
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 3: Route Options/Results -->
+        <div id="screen3" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen2')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Route Options</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <div class="text-sm text-gray-500" id="route-destination-display">India Gate</div>
+                        <div class="font-medium" id="route-options-count">5 route options</div>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="traffic-light traffic-yellow mr-1"></span>
+                        <span class="text-xs text-gray-500">Live Traffic</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 1: Shortest Route -->
+                <div class="card slide-up" onclick="window.selectRoute(this, 'shortest')" data-route-id="shortest" style="animation-delay: 0.1s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Shortest Route</h3>
+                            <div class="text-sm text-gray-500">Via Barakhamba Road</div>
+                        </div>
+                        <span class="badge badge-yellow route-recommendation-badge">Shortest</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">40 min</span> 
+                        <span class="text-sm text-gray-500">(11.0 km)</span> 
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 150</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.1 L</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.7 kg CO₂</span> 
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 55%"></div> 
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 2: Fastest Route -->
+                <div class="card slide-up" onclick="window.selectRoute(this, 'fastest')" data-route-id="fastest" style="animation-delay: 0.2s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Fastest Route</h3>
+                            <div class="text-sm text-gray-500">Via Ring Road</div>
+                        </div>
+                        <span class="badge badge-green route-recommendation-badge">Recommended</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">38 min</span>
+                        <span class="text-sm text-gray-500">(12.5 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 145</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.2 L</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.8 kg CO₂</span>
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 60%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 3: LEAP -->
+                <div class="card slide-up" onclick="window.selectRoute(this, 'leap')" data-route-id="leap" style="animation-delay: 0.3s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">LEAP Route</h3>
+                            <div class="text-sm text-gray-500">Via Outer Ring Road</div>
+                        </div>
+                        <span class="badge badge-blue route-recommendation-badge">Eco</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">45 min</span>
+                        <span class="text-sm text-gray-500">(14.0 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 105</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.5 L</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.5 kg CO₂</span>
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 80%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 4: LECR -->
+                <div class="card slide-up" onclick="window.selectRoute(this, 'lecr')" data-route-id="lecr" style="animation-delay: 0.4s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">LECR Route</h3>
+                            <div class="text-sm text-gray-500">Via Mathura Road</div>
+                        </div>
+                        <span class="badge badge-blue route-recommendation-badge">Eco</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">42 min</span>
+                        <span class="text-sm text-gray-500">(13.0 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 130</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.0 L</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.2 kg CO₂</span>
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 90%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 5: Suggested Route (Mix of all) -->
+                <div class="card slide-up" onclick="window.selectRoute(this, 'suggested')" data-route-id="suggested" style="animation-delay: 0.5s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Suggested Route</h3>
+                            <div class="text-sm text-gray-500">Balanced for Time & Impact</div>
+                        </div>
+                        <span class="badge badge-green route-recommendation-badge">Optimal</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">41 min</span> 
+                        <span class="text-sm text-gray-500">(13.5 km)</span> 
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 120</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.3 L</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.4 kg CO₂</span> 
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 70%"></div> 
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-primary w-full mb-3" id="start-navigation-button" onclick="window.startNavigation()" disabled>
+                    Start Navigation
+                </button>
+                <button class="button-secondary w-full mb-3" onclick="window.saveSelectedRoute()">
+                    <i class="fas fa-bookmark mr-2"></i> Save Route
+                </button>
+                <button class="button-secondary w-full" onclick="window.showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+            <div id="toast-message" class="toast-message"></div>
+        </div>
+
+        <!-- Screen 4: Saved Routes -->
+        <div id="screen4" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Saved Routes</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5" id="saved-routes-list">
+                <!-- Saved routes will be dynamically added here -->
+                <div class="text-center text-gray-500 mt-10" id="no-saved-routes-message">
+                    No routes saved yet.
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-secondary w-full" onclick="window.showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 5: User Profile (Placeholder) -->
+        <div id="screen5" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">User Profile</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+            <div class="flex-1 flex flex-col items-center p-5 text-center">
+                <div class="w-24 h-24 rounded-full bg-gray-200 flex items-center justify-center text-gray-500 text-5xl mb-4">
+                    <i class="fas fa-user-circle"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-gray-800 mb-2">Welcome, Eco-Warrior!</h2>
+                <p class="text-gray-600 mb-2">Your journey towards a greener Delhi starts here.</p>
+                <p class="text-gray-600 mb-6">Your User ID: <span class="font-mono text-sm" id="user-id-display">Loading...</span></p>
+
+                <div class="profile-stats w-full max-w-xs">
+                    <div class="stat-card" style="animation-delay: 0.1s;">
+                        <div class="stat-value text-green-600" id="profile-eco-trips">0</div>
+                        <div class="stat-label">Eco Trips</div>
+                    </div>
+                    <div class="stat-card" style="animation-delay: 0.2s;">
+                        <div class="stat-value text-blue-600" id="profile-total-distance">0 km</div>
+                        <div class="stat-label">Total Distance</div>
+                    </div>
+                    <div class="stat-card" style="animation-delay: 0.3s;">
+                        <div class="stat-value text-yellow-600" id="profile-avg-aqi">0</div>
+                        <div class="stat-label">Avg. AQI Avoided</div>
+                    </div>
+                    <div class="stat-card" style="animation-delay: 0.4s;">
+                        <div class="stat-value text-purple-600" id="profile-co2-saved">0 kg</div>
+                        <div class="stat-label">CO₂ Saved</div>
+                    </div>
+                </div>
+
+                <div class="carbon-savings w-full max-w-xs mt-8">
+                    <div class="carbon-value">You've saved enough CO₂ for:</div>
+                    <i class="fas fa-tree carbon-tree animate-pulse"></i>
+                    <div class="carbon-value" style="top: 60px; font-size: 1.5rem;">0 Trees yet!</div>
+                </div>
+
+                <button class="button-secondary w-full mt-8" onclick="window.logoutUser()">
+                    Logout
+                </button>
+                <button class="button-secondary w-full mt-3" onclick="window.showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 6: Notifications (Placeholder) -->
+        <div id="screen6" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Notifications</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto bg-gray-50">
+                <div class="notification-item">
+                    <div class="notification-icon bg-green-100 text-green-600">
+                        <i class="fas fa-leaf"></i>
+                    </div>
+                    <div class="notification-info">
+                        <h4 class="font-semibold text-gray-800">Trip Summary Ready!</h4>
+                        <p class="text-sm text-gray-600">Your last trip saved 0.5 kg of CO₂. Great job!</p>
+                        <span class="notification-time">Just now</span>
+                    </div>
+                </div>
+                <div class="notification-item">
+                    <div class="notification-icon bg-blue-100 text-blue-600">
+                        <i class="fas fa-route"></i>
+                    </div>
+                    <div class="notification-info">
+                        <h4 class="font-semibold text-gray-800">New Eco-Route Available</h4>
+                        <p class="text-sm text-gray-600">Discover a new LEAP route to India Gate. Less pollution!</p>
+                        <span class="notification-time">2 hours ago</span>
+                    </div>
+                </div>
+                <div class="notification-item">
+                    <div class="notification-icon bg-yellow-100 text-yellow-600">
+                        <i class="fas fa-cloud-sun"></i>
+                    </div>
+                    <div class="notification-info">
+                        <h4 class="font-semibold text-gray-800">AQI Alert for Karol Bagh</h4>
+                        <p class="text-sm text-gray-600">AQI is currently high in Karol Bagh. Consider an alternative route.</p>
+                        <span class="notification-time">Yesterday</span>
+                    </div>
+                </div>
+                <div class="text-center text-gray-500 mt-10">
+                    <p>No older notifications.</p>
+                </div>
+            </div>
+            <div class="footer p-5">
+                <button class="button-secondary w-full" onclick="window.showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 7: History (Placeholder) -->
+        <div id="screen7" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Trip History</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5" id="trip-history-list">
+                <!-- Trip history will be dynamically added here -->
+                <div class="text-center text-gray-500 mt-10" id="no-trip-history-message">
+                    No past trips yet.
+                </div>
+            </div>
+            <div class="footer p-5">
+                <button class="button-secondary w-full" onclick="window.showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 8: Settings (Placeholder) -->
+        <div id="screen8" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Settings</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5 bg-gray-50">
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                    <h3 class="font-bold text-lg mb-4">General Settings</h3>
+                    <div class="setting-item">
+                        <span class="text-gray-700">Notifications</span>
+                        <label class="switch">
+                            <input type="checkbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span class="text-gray-700">Dark Mode</span>
+                        <label class="switch">
+                            <input type="checkbox">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <span class="text-gray-700">Unit System (km/miles)</span>
+                        <label class="switch">
+                            <input type="checkbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item border-b-0">
+                        <span class="text-gray-700">Clear Cache</span>
+                        <button class="text-blue-500 font-medium">Clear</button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mt-6">
+                    <h3 class="font-bold text-lg mb-4">Account</h3>
+                    <button class="button-secondary w-full mb-3">Change Password</button>
+                    <button class="button-secondary w-full" onclick="window.logoutUser()">Logout</button>
+                </div>
+
+                <div class="text-center text-gray-500 text-xs mt-8">
+                    <p>&copy; 2024 DRUM App. All rights reserved.</p>
+                    <p class="mt-1">Version 1.0.0</p>
+                </div>
+            </div>
+            <div class="footer p-5">
+                <button class="button-secondary w-full" onclick="window.showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 9: Live Navigation -->
+        <div id="screen9" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.endTrip()">
+                        <i class="fas fa-times"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Live Navigation</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col items-center justify-center p-5 relative">
+                <div class="map-container relative h-full w-full mb-4">
+                    <!-- Leaflet Map for Live Navigation -->
+                    <div id="leaflet-nav-map" class="map-image"></div>
+                    
+                    <div class="map-overlay">
+                        <div class="flex justify-between items-end">
+                            <div>
+                                <div class="text-white font-semibold">Current Location</div>
+                                <div class="text-sm text-gray-200" id="nav-current-location">Near Connaught Place</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="flex items-center justify-end">
+                                    <span class="traffic-light traffic-yellow" id="nav-live-traffic-dot"></span>
+                                    <span class="text-xs text-gray-200" id="nav-live-traffic-text">Live Traffic: Moderate</span>
+                                </div>
+                                <div class="text-white font-bold text-lg" id="nav-estimated-time">35 min</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="aqi-indicator">
+                        <span class="aqi-dot bg-orange-500" id="nav-live-aqi-dot"></span>
+                        <span>Live AQI: <span id="nav-live-aqi-value">130</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-primary w-full" onclick="window.endTrip()">
+                    End Trip
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 10: Trip Summary -->
+        <div id="screen10" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Trip Summary</h1>
+                    <!-- Comparison Table Button -->
+                    <button class="text-white text-md px-3 py-1 rounded-full bg-blue-600 hover:bg-blue-700 transition-colors" onclick="window.showScreen('screen11')">
+                        <i class="fas fa-table mr-1"></i> Compare
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col items-center justify-center p-5 text-center">
+                <i class="fas fa-check-circle text-green-500 text-6xl mb-4"></i>
+                <h2 class="text-2xl font-bold text-gray-800 mb-3">Trip Completed!</h2>
+                <p class="text-gray-600 mb-6">Here's your eco-impact for this journey:</p>
+
+                <div class="bg-white rounded-xl p-6 shadow-md border border-gray-100 w-full max-w-xs mb-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="text-left">
+                            <div class="text-sm text-gray-500">CO₂ Saved</div>
+                            <div class="text-3xl font-bold text-green-600" id="summary-co2">0 kg</div>
+                        </div>
+                        <i class="fas fa-leaf text-green-500 text-4xl"></i>
+                    </div>
+                    <div class="flex items-center justify-between mb-4">
+                        <div class="text-left">
+                            <div class="text-sm text-gray-500">Distance</div>
+                            <div class="text-3xl font-bold text-blue-600" id="summary-distance">0 km</div>
+                        </div>
+                        <i class="fas fa-route text-blue-500 text-4xl"></i>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="text-left">
+                            <div class="text-sm text-gray-500">Duration</div>
+                            <div class="text-3xl font-bold text-yellow-600" id="summary-duration">0 min</div>
+                        </div>
+                        <i class="fas fa-clock text-yellow-500 text-4xl"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-primary w-full" onclick="window.showScreen('screen1')">
+                    Go to Home
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 11: Comparison Table -->
+        <div id="screen11" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="window.showScreen('screen10')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Route Comparison</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-5">
+                <h2 class="text-lg font-bold text-gray-800 mb-4">Compare Route Options</h2>
+                <div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-x-auto">
+                    <table class="comparison-table">
+                        <thead>
+                            <tr>
+                                <th>Metric</th>
+                                <th>Shortest</th>
+                                <th>Fastest</th>
+                                <th>LEAP</th>
+                                <th>LECR</th>
+                                <th>Suggested</th>
+                            </tr>
+                        </thead>
+                        <tbody id="comparison-table-body">
+                            <!-- Table rows will be dynamically inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="footer p-5">
+                <button class="button-secondary w-full" onclick="window.showScreen('screen10')">
+                    Back to Summary
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script type="module">
+        // Import necessary Firestore functions from global scope
+        const db = window.db;
+        const collection = window.collection;
+        const addDoc = window.addDoc;
+        const onSnapshot = window.onSnapshot;
+        const query = window.query;
+        const getDocs = window.getDocs; // Ensure getDocs is imported
+        const userId = window.userId;
+        const isAuthReady = window.isAuthReady;
+        const signOut = window.signOut; // Import signOut
+
+        // Global variables
+        window.savedRoutes = window.savedRoutes || []; // Initialize if not already from Firebase script
+        window.tripHistory = window.tripHistory || []; // Initialize trip history
+        let currentSelectedRoute = null; // To keep track of the route selected on screen 3
+        let selectedPriorityType = 'fastest'; // Default selected priority
+        let navigationInterval; // To store the interval ID for live navigation updates
+
+        // Leaflet map instances
+        let mainMap = null;
+        let navMap = null;
+        let hotspotLayers = [];
+        let navRoutePolyline = null;
+        let navCurrentLocationMarker = null;
+
+        // Dummy route data for demonstration
+        const dummyRoutes = {
+            shortest: {
+                name: "Shortest Route",
+                via: "Barakhamba Road",
+                time: "40 min",
+                distance: "11.0 km",
+                aqi: 150,
+                fuel: "1.1 L",
+                co2: "1.7 kg CO₂",
+                impactWidth: 55,
+                badge: "Shortest",
+                badgeClass: "badge-yellow",
+                mapText: "Shortest Route via Barakhamba Road",
+                // Example coordinates for a route (simplified for demo)
+                path: [[28.6328, 77.2187], [28.6350, 77.2250], [28.6290, 77.2280], [28.6235, 77.2290]]
+            },
+            fastest: {
+                name: "Fastest Route",
+                via: "Ring Road",
+                time: "38 min",
+                distance: "12.5 km",
+                aqi: 145,
+                fuel: "1.2 L",
+                co2: "1.8 kg CO₂",
+                impactWidth: 60,
+                badge: "Recommended",
+                badgeClass: "badge-green",
+                mapText: "Fastest Route via Ring Road",
+                path: [[28.6328, 77.2187], [28.6400, 77.2200], [28.6300, 77.2350], [28.6235, 77.2290]]
+            },
+            leap: {
+                name: "LEAP Route",
+                via: "Outer Ring Road",
+                time: "45 min",
+                distance: "14.0 km",
+                aqi: 105,
+                fuel: "1.5 L",
+                co2: "1.5 kg CO₂",
+                impactWidth: 80,
+                badge: "Eco",
+                badgeClass: "badge-blue",
+                mapText: "LEAP Route via Outer Ring Road",
+                path: [[28.6328, 77.2187], [28.6500, 77.2100], [28.6400, 77.2300], [28.6235, 77.2290]]
+            },
+            lecr: {
+                name: "LECR Route",
+                via: "Mathura Road",
+                time: "42 min",
+                distance: "13.0 km",
+                aqi: 130,
+                fuel: "1.0 L",
+                co2: "1.2 kg CO₂",
+                impactWidth: 90,
+                badge: "Eco",
+                badgeClass: "badge-blue",
+                mapText: "LECR Route via Mathura Road",
+                path: [[28.6328, 77.2187], [28.6200, 77.2100], [28.6150, 77.2250], [28.6235, 77.2290]]
+            },
+            suggested: {
+                name: "Suggested Route",
+                via: "Balanced for Time & Impact",
+                time: "41 min",
+                distance: "13.5 km",
+                aqi: 120,
+                fuel: "1.3 L",
+                co2: "1.4 kg CO₂",
+                impactWidth: 70,
+                badge: "Optimal",
+                badgeClass: "badge-green",
+                mapText: "Suggested Route for Optimal Balance",
+                path: [[28.6328, 77.2187], [28.6380, 77.2150], [28.6280, 77.2220], [28.6235, 77.2290]]
+            }
+        };
+
+        // Dummy list of Delhi places for autocomplete
+        const delhiPlaces = [
+            "India Gate", "Red Fort", "Qutub Minar", "Humayun's Tomb", "Lotus Temple",
+            "Akshardham Temple", "Chandni Chowk", "Connaught Place", "Hauz Khas Village",
+            "Sarojini Nagar Market", "Dilli Haat", "Jantar Mantar", "Agrasen ki Baoli",
+            "National Rail Museum", "Garden of Five Senses", "Lodhi Garden", "Mehrauli Archaeological Park",
+            "Jama Masjid", "Rashtrapati Bhavan", "Parliament House", "Supreme Court of India",
+            "Delhi Zoo", "Purana Qila", "Bangla Sahib Gurudwara", "Select Citywalk",
+            "Ambience Mall Vasant Kunj", "Pacific Mall Tagore Garden", "DLF Avenue Saket",
+            "Khan Market", "Greater Kailash", "Defence Colony", "Vasant Kunj", "Dwarka",
+            "Rohini", "Pitampura", "Lajpat Nagar", "Karol Bagh", "Rajouri Garden",
+            "Civil Lines", "Mayur Vihar", "Noida Sector 18", "Cyber Hub Gurgaon" // Including nearby NCR popular spots for realism
+        ].sort(); // Sort alphabetically for better user experience
+
+        // Hotspot data for simulation (now with lat/lng)
+        const hotspotsData = [
+            { id: 'hotspot1', lat: 28.6350, lng: 77.2100 }, // Near Connaught Place
+            { id: 'hotspot2', lat: 28.6200, lng: 77.2250 }, // Towards India Gate
+            { id: 'hotspot3', lat: 28.6450, lng: 77.2300 }, // North-East of CP
+            { id: 'hotspot4', lat: 28.6100, lng: 77.2150 }  // South-West of CP
+        ];
+
+        // Function to update the current time in the status bar
+        window.updateCurrentTime = function() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            document.getElementById('current-time').textContent = timeString;
+        };
+
+        // Initialize Leaflet map for home screen
+        window.initializeMainMap = function() {
+            if (mainMap) mainMap.remove(); // Remove existing map if any
+            mainMap = L.map('leaflet-map', {
+                zoomControl: false, // Hide default zoom controls
+                minZoom: 12,
+                maxZoom: 16,
+                attributionControl: false // Hide Leaflet attribution
+            }).setView([28.6328, 77.2187], 14); // Centered on Connaught Place, Delhi
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                tileSize: 256,
+                maxZoom: 18
+            }).addTo(mainMap);
+
+            // Add start and end markers
+            L.marker([28.6328, 77.2187], {
+                title: 'Start: Connaught Place',
+                icon: L.divIcon({
+                    className: 'custom-div-icon',
+                    html: '<i class="fas fa-circle-dot text-red-500 text-2xl"></i>', // Red dot for start
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 24]
+                })
+            }).addTo(mainMap).bindPopup('Start: Connaught Place');
+
+            L.marker([28.6235, 77.2290], {
+                title: 'End: India Gate',
+                icon: L.divIcon({
+                    className: 'custom-div-icon',
+                    html: '<i class="fas fa-flag-checkered text-blue-500 text-2xl"></i>', // Blue flag for end
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 24]
+                })
+            }).addTo(mainMap).bindPopup('End: India Gate');
+
+            window.updateHotspotsOnMap(mainMap); // Add initial hotspots
+        };
+
+        // Initialize Leaflet map for navigation screen
+        window.initializeNavMap = function() {
+            if (navMap) navMap.remove(); // Remove existing map if any
+            navMap = L.map('leaflet-nav-map', {
+                zoomControl: false, // Hide default zoom controls
+                minZoom: 12,
+                maxZoom: 16,
+                attributionControl: false // Hide Leaflet attribution
+            }).setView([28.6328, 77.2187], 14); // Centered on Connaught Place, Delhi
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                tileSize: 256,
+                maxZoom: 18
+            }).addTo(navMap);
+        };
+
+        // Update hotspots on a given map instance
+        window.updateHotspotsOnMap = function(mapInstance) {
+            hotspotLayers.forEach(layer => mapInstance.removeLayer(layer));
+            hotspotLayers = [];
+
+            hotspotsData.forEach(hotspot => {
+                const aqi = Math.floor(Math.random() * (200 - 50 + 1)) + 50; // Random AQI
+                const trafficLevels = ['Light', 'Moderate', 'Heavy'];
+                const traffic = trafficLevels[Math.floor(Math.random() * trafficLevels.length)];
+
+                const aqiColor = aqi < 100 ? '#10B981' : aqi < 150 ? '#F59E0B' : '#EF4444';
+                const trafficBorderColor = traffic === 'Light' ? '#10B981' : traffic === 'Moderate' ? '#F59E0B' : '#EF4444';
+                const radius = aqi < 100 ? 10 : aqi < 150 ? 12 : 14; // Larger radius for higher AQI
+
+                const circle = L.circleMarker([hotspot.lat, hotspot.lng], {
+                    radius: radius,
+                    fillColor: aqiColor,
+                    color: trafficBorderColor,
+                    weight: 2,
+                    opacity: 0.8,
+                    fillOpacity: 0.7
+                }).addTo(mapInstance).bindPopup(`<b>AQI: ${aqi}</b><br>Traffic: ${traffic}`);
+
+                hotspotLayers.push(circle);
+            });
+        };
+
+        // Function to update live AQI and Traffic (simulated) for home screen
+        window.updateLiveData = function() {
+            const aqiValueElement = document.getElementById('live-aqi-value');
+            const aqiDotElement = document.getElementById('live-aqi-dot');
+            const trafficTextElement = document.getElementById('live-traffic-text');
+            const trafficDotElement = document.getElementById('live-traffic-dot');
+            const travelTimeElement = document.getElementById('live-travel-time');
+
+            // Simulate main AQI changes
+            const randomAqi = Math.floor(Math.random() * (200 - 50 + 1)) + 50; // AQI between 50 and 200
+            aqiValueElement.textContent = randomAqi;
+            if (randomAqi < 100) {
+                aqiDotElement.className = 'aqi-dot bg-green-500';
+            } else if (randomAqi < 150) {
+                aqiDotElement.className = 'aqi-dot bg-orange-500';
+            } else {
+                aqiDotElement.className = 'aqi-dot bg-red-500';
+            }
+
+            // Simulate main Traffic changes
+            const trafficLevels = ['Light', 'Moderate', 'Heavy'];
+            const trafficColors = ['traffic-green', 'traffic-yellow', 'traffic-red'];
+            const randomTrafficIndex = Math.floor(Math.random() * trafficLevels.length);
+            trafficTextElement.textContent = `Live Traffic: ${trafficLevels[randomTrafficIndex]}`;
+            trafficDotElement.className = `traffic-light ${trafficColors[randomTrafficIndex]}`;
+
+            // Simulate travel time changes based on traffic
+            let baseTime = 45; // Base time for Connaught Place to India Gate
+            if (trafficLevels[randomTrafficIndex] === 'Heavy') {
+                baseTime += Math.floor(Math.random() * 10) + 5; // Add 5-15 min for heavy traffic
+            } else if (trafficLevels[randomTrafficIndex] === 'Light') {
+                baseTime -= Math.floor(Math.random() * 10) + 5; // Subtract 5-15 min for light traffic
+                if (baseTime < 30) baseTime = 30; // Minimum travel time
+            }
+            travelTimeElement.textContent = `${baseTime} min`;
+
+            // Update hotspots on the main map
+            if (mainMap) window.updateHotspotsOnMap(mainMap);
+        };
+
+
+        // Call updateCurrentTime and updateLiveData initially and periodically
+        window.updateCurrentTime();
+        window.updateLiveData();
+        setInterval(window.updateCurrentTime, 60000); // Every minute
+        setInterval(window.updateLiveData, 10000); // Every 10 seconds for more dynamic feel
+
+        // Function to handle screen transitions
+        window.showScreen = function(screenId) {
+            const screens = document.querySelectorAll('.screen');
+            screens.forEach(screen => {
+                screen.classList.remove('active');
+                // For welcome screen, ensure it's fully off-screen and transparent when not active
+                if (screen.id === 'screen0') {
+                    screen.style.transform = 'translateX(100%)';
+                    screen.style.opacity = '0';
+                }
+            });
+            document.getElementById(screenId).classList.add('active');
+            // For welcome screen, ensure it slides in
+            if (screenId === 'screen0') {
+                document.getElementById(screenId).style.transform = 'translateX(0)';
+                document.getElementById(screenId).style.opacity = '1';
+            }
+
+
+            // Update footer navigation active state
+            const navTabs = document.querySelectorAll('.nav-tab');
+            navTabs.forEach(tab => tab.classList.remove('active'));
+            if (screenId === 'screen1') {
+                document.querySelector('.nav-tab:nth-child(1)').classList.add('active');
+                if (!mainMap) window.initializeMainMap(); // Initialize map if not already
+                mainMap.invalidateSize(); // Fix map tile loading issues after screen transition
+            } else if (screenId === 'screen4') {
+                document.querySelector('.nav-tab:nth-child(2)').classList.add('active');
+                window.renderSavedRoutes(); // Render saved routes when navigating to screen 4
+            } else if (screenId === 'screen7') { // History tab
+                document.querySelector('.nav-tab:nth-child(3)').classList.add('active');
+                window.renderTripHistory(); // Render trip history when navigating to screen 7
+            } else if (screenId === 'screen8') { // Profile tab (now screen8)
+                document.querySelector('.nav-tab:nth-child(4)').classList.add('active');
+                // Update User ID display on profile screen
+                if (document.getElementById('user-id-display')) {
+                    document.getElementById('user-id-display').textContent = window.userId || 'Not available';
+                }
+                window.updateProfileStats(); // Update profile stats when navigating to screen 8
+            }
+            
+            // If navigating to screen 2, update destination input from screen 1
+            if (screenId === 'screen2') {
+                const destination1 = document.getElementById('destination-input').value;
+                document.getElementById('destination-input-2').value = destination1;
+                window.hideSuggestions('suggestions1'); // Hide suggestions from screen 1
+            }
+            // If navigating to screen 3, update destination display and recommendations
+            if (screenId === 'screen3') {
+                const destination2 = document.getElementById('destination-input-2').value;
+                document.getElementById('route-destination-display').textContent = destination2;
+                
+                // Set default selected route based on selectedPriorityType
+                let defaultRouteId = selectedPriorityType;
+                if (!dummyRoutes[defaultRouteId]) { // Fallback if selectedPriorityType doesn't match a route ID
+                    defaultRouteId = 'fastest'; 
+                }
+                window.selectRoute(document.querySelector(`[data-route-id="${defaultRouteId}"]`), defaultRouteId);
+
+                // Update recommendation badges based on selected priority
+                const recommendationBadges = document.querySelectorAll('.route-recommendation-badge');
+                recommendationBadges.forEach(badge => {
+                    const parentCard = badge.closest('.card');
+                    const routeId = parentCard.dataset.routeId;
+                    if (routeId === selectedPriorityType) {
+                        badge.textContent = 'Recommended';
+                        badge.classList.remove('badge-yellow', 'badge-blue');
+                        badge.classList.add('badge-green');
+                    } else {
+                        // Reset badges to their original text/color
+                        const originalRouteData = dummyRoutes[routeId];
+                        badge.textContent = originalRouteData.badge;
+                        badge.className = `badge ${originalRouteData.badgeClass} route-recommendation-badge`;
+                    }
+                });
+                window.hideSuggestions('suggestions2'); // Hide suggestions from screen 2
+            }
+
+            // Redraw forecast chart if navigating to screen1
+            if (screenId === 'screen1') {
+                window.drawForecastChart();
+            }
+
+            // Populate comparison table if navigating to screen 11
+            if (screenId === 'screen11') {
+                window.populateComparisonTable();
+            }
+        };
+
+        // Function to select a vehicle type
+        window.selectVehicle = function(selectedElement, vehicleType) {
+            const vehicleOptions = document.querySelectorAll('.vehicle-option');
+            vehicleOptions.forEach(option => {
+                option.classList.remove('selected');
+            });
+            selectedElement.classList.add('selected');
+            console.log('Selected Vehicle:', vehicleType);
+        };
+
+        // Function to select a route priority option
+        window.selectPriorityOption = function(selectedElement, priorityType) {
+            const priorityOptions = document.querySelectorAll('.priority-option');
+            priorityOptions.forEach(option => {
+                option.classList.remove('selected');
+            });
+            selectedElement.classList.add('selected');
+            selectedPriorityType = priorityType; // Store the selected priority type
+            console.log('Selected Priority:', selectedPriorityType);
+        };
+
+        // Function to handle finding routes (simulated API call)
+        window.findRoutes = function() {
+            const findRoutesText = document.getElementById('find-routes-text');
+            const findingRoutesSpinner = document.getElementById('finding-routes');
+            const findRoutesButton = document.querySelector('#screen2 .button-primary');
+
+            // Show loading state
+            findRoutesText.classList.add('hidden');
+            findingRoutesSpinner.classList.remove('hidden');
+            findRoutesButton.classList.remove('pulse'); // Stop pulse animation during loading
+            findRoutesButton.disabled = true; // Disable button
+
+            // Simulate API call delay
+            setTimeout(() => {
+                // Hide loading state
+                findRoutesText.classList.remove('hidden');
+                findingRoutesSpinner.classList.add('hidden');
+                findRoutesButton.classList.add('pulse'); // Resume pulse animation
+                findRoutesButton.disabled = false; // Re-enable button
+
+                // Transition to screen 3 (Route Options)
+                window.showScreen('screen3');
+            }, 2000); // 2 second delay
+        };
+
+        // Function to select a route option on screen 3
+        window.selectRoute = function(selectedElement, routeId) {
+            const routeCards = document.querySelectorAll('#screen3 .card');
+            routeCards.forEach(card => {
+                card.classList.remove('selected');
+            });
+            selectedElement.classList.add('selected');
+            currentSelectedRoute = dummyRoutes[routeId]; // Store the selected route details
+            console.log('Selected Route:', routeId, currentSelectedRoute);
+
+            // Enable the "Start Navigation" button
+            document.getElementById('start-navigation-button').disabled = false;
+
+            // Update the map overlay text based on the selected route
+            const mapOverlayText = document.querySelector('#screen1 .map-overlay .text-sm.text-gray-200');
+            const mapOverlayTime = document.querySelector('#screen1 .map-overlay .text-white.font-bold.text-lg');
+            const mapOverlayAqiValue = document.getElementById('live-aqi-value');
+            const mapOverlayAqiDot = document.getElementById('live-aqi-dot');
+
+            mapOverlayText.textContent = `Via ${currentSelectedRoute.via}`;
+            mapOverlayTime.textContent = currentSelectedRoute.time;
+            mapOverlayAqiValue.textContent = currentSelectedRoute.aqi;
+            if (currentSelectedRoute.aqi < 100) {
+                mapOverlayAqiDot.className = 'aqi-dot bg-green-500';
+            } else if (currentSelectedRoute.aqi < 150) {
+                mapOverlayAqiDot.className = 'aqi-dot bg-orange-500';
+            } else {
+                mapOverlayAqiDot.className = 'aqi-dot bg-red-500';
+            }
+            // Traffic is still live-simulated by updateLiveData
+        };
+
+        // Function to show a toast message
+        window.showToast = function(message) {
+            const toast = document.getElementById('toast-message');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000); // Hide after 3 seconds
+        };
+
+        // Function to save the currently selected route to Firestore
+        window.saveSelectedRoute = async function() {
+            if (!currentSelectedRoute) {
+                window.showToast('Please select a route first!');
+                return;
+            }
+            if (!window.isAuthReady || !window.userId || !window.db) {
+                window.showToast('Application not ready. Please wait for initialization.');
+                console.error("Firestore not ready for saving.");
+                return;
+            }
+
+            try {
+                // Create a copy of the route data to modify for saving
+                const routeToSave = { ...currentSelectedRoute };
+                // Serialize the 'path' array to a JSON string
+                routeToSave.path = JSON.stringify(routeToSave.path);
+
+                // Check if the route is already saved to prevent duplicates
+                const routesCollectionRef = collection(window.db, `artifacts/${__app_id}/users/${window.userId}/savedRoutes`);
+                const q = query(routesCollectionRef);
+                const querySnapshot = await getDocs(q);
+                const isAlreadySaved = querySnapshot.docs.some(doc => {
+                    const data = doc.data();
+                    return data.name === routeToSave.name && data.via === routeToSave.via;
+                });
+
+                if (!isAlreadySaved) {
+                    await addDoc(routesCollectionRef, routeToSave);
+                    window.showToast('Route saved successfully!');
+                    console.log('Route saved to Firestore:', routeToSave);
+                } else {
+                    window.showToast('This route is already saved!');
+                }
+            } catch (e) {
+                console.error("Error adding document: ", e);
+                window.showToast('Error saving route. Please try again.');
+            }
+        };
+
+        // Function to render saved routes on screen 4
+        window.renderSavedRoutes = function() {
+            const savedRoutesList = document.getElementById('saved-routes-list');
+            const noSavedRoutesMessage = document.getElementById('no-saved-routes-message');
+            savedRoutesList.innerHTML = ''; // Clear previous list
+
+            if (window.savedRoutes.length === 0) { // Use window.savedRoutes
+                noSavedRoutesMessage.style.display = 'block';
+                savedRoutesList.appendChild(noSavedRoutesMessage);
+            } else {
+                noSavedRoutesMessage.style.display = 'none';
+                window.savedRoutes.forEach((route, index) => { // Use window.savedRoutes
+                    const routeCard = document.createElement('div');
+                    routeCard.classList.add('card', 'slide-up');
+                    routeCard.style.animationDelay = `${0.1 * index}s`; // Stagger animation
+
+                    routeCard.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 class="font-bold text-lg">${route.name}</h3>
+                                <div class="text-sm text-gray-500">Via ${route.via}</div>
+                            </div>
+                            <span class="badge ${route.badgeClass}">${route.badge}</span>
+                        </div>
+                        <div class="flex items-center mb-2">
+                            <span class="text-2xl font-bold mr-2">${route.time}</span>
+                            <span class="text-sm text-gray-500">(${route.distance})</span>
+                        </div>
+                        <div class="route-details">
+                            <div class="route-detail-item">
+                                <i class="route-detail-icon fas fa-smog"></i>
+                                <span>AQI ${route.aqi}</span>
+                            </div>
+                            <div class="route-detail-item">
+                                <i class="route-detail-icon fas fa-gas-pump"></i>
+                                <span>${route.fuel}</span>
+                            </div>
+                            <div class="route-detail-item">
+                                <i class="route-detail-icon fas fa-leaf"></i>
+                                <span>${route.co2}</span>
+                            </div>
+                        </div>
+                        <div class="impact-meter mt-3">
+                            <div class="impact-fill" style="width: ${route.impactWidth}%"></div>
+                        </div>
+                        <div class="flex justify-between text-xs text-gray-500 mt-1">
+                            <span>Worst</span>
+                            <span>Best</span>
+                        </div>
+                    `;
+                    savedRoutesList.appendChild(routeCard);
+                });
+            }
+        };
+
+        // Function to render trip history on screen 7
+        window.renderTripHistory = function() {
+            const tripHistoryList = document.getElementById('trip-history-list');
+            const noTripHistoryMessage = document.getElementById('no-trip-history-message');
+            tripHistoryList.innerHTML = ''; // Clear previous list
+
+            if (window.tripHistory.length === 0) {
+                noTripHistoryMessage.style.display = 'block';
+                tripHistoryList.appendChild(noTripHistoryMessage);
+            } else {
+                noTripHistoryMessage.style.display = 'none';
+                window.tripHistory.forEach((trip, index) => {
+                    const tripCard = document.createElement('div');
+                    tripCard.classList.add('card', 'slide-up');
+                    tripCard.style.animationDelay = `${0.1 * index}s`; // Stagger animation
+
+                    const tripDate = new Date(trip.timestamp).toLocaleDateString('en-US', {
+                        year: 'numeric', month: 'short', day: 'numeric'
+                    });
+                    const tripTime = new Date(trip.timestamp).toLocaleTimeString('en-US', {
+                        hour: '2-digit', minute: '2-digit'
+                    });
+
+                    tripCard.innerHTML = `
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 class="font-bold text-lg">Trip to ${trip.destination || 'Unknown'}</h3>
+                                <div class="text-sm text-gray-500">${tripDate} at ${tripTime}</div>
+                            </div>
+                            <span class="badge ${trip.badgeClass || 'badge-green'}">${trip.badge || 'Completed'}</span>
+                        </div>
+                        <div class="flex items-center mb-2">
+                            <span class="text-2xl font-bold mr-2">${trip.time}</span>
+                            <span class="text-sm text-gray-500">(${trip.distance})</span>
+                        </div>
+                        <div class="route-details">
+                            <div class="route-detail-item">
+                                <i class="route-detail-icon fas fa-smog"></i>
+                                <span>AQI ${trip.aqi}</span>
+                            </div>
+                            <div class="route-detail-item">
+                                <i class="route-detail-icon fas fa-gas-pump"></i>
+                                <span>${trip.fuel}</span>
+                            </div>
+                            <div class="route-detail-item">
+                                <i class="route-detail-icon fas fa-leaf"></i>
+                                <span>${trip.co2}</span>
+                            </div>
+                        </div>
+                        <div class="impact-meter mt-3">
+                            <div class="impact-fill" style="width: ${trip.impactWidth}%"></div>
+                        </div>
+                    `;
+                    tripHistoryList.appendChild(tripCard);
+                });
+            }
+        };
+
+
+        // Autocomplete functions
+        window.showSuggestions = function(inputElement, suggestionsContainerId) {
+            const query = inputElement.value.toLowerCase();
+            const suggestionsContainer = document.getElementById(suggestionsContainerId);
+            suggestionsContainer.innerHTML = ''; // Clear previous suggestions
+
+            if (query.length === 0) {
+                suggestionsContainer.classList.add('hidden');
+                return;
+            }
+
+            const filteredPlaces = delhiPlaces.filter(place => 
+                place.toLowerCase().includes(query)
+            );
+
+            if (filteredPlaces.length > 0) {
+                filteredPlaces.forEach(place => {
+                    const suggestionItem = document.createElement('div');
+                    suggestionItem.classList.add('autocomplete-suggestion-item');
+                    suggestionItem.textContent = place;
+                    suggestionItem.onmousedown = (event) => { // Use mousedown to prevent blur event from firing first
+                        event.preventDefault(); // Prevent input from losing focus immediately
+                        window.selectSuggestion(inputElement, place, suggestionsContainerId);
+                    };
+                    suggestionsContainer.appendChild(suggestionItem);
+                });
+                suggestionsContainer.classList.remove('hidden');
+            } else {
+                suggestionsContainer.classList.add('hidden');
+            }
+        };
+
+        window.selectSuggestion = function(inputElement, selectedPlace, suggestionsContainerId) {
+            inputElement.value = selectedPlace;
+            document.getElementById(suggestionsContainerId).classList.add('hidden');
+        };
+
+        window.hideSuggestions = function(suggestionsContainerId) {
+            // A small delay to allow click event on suggestion item to register
+            setTimeout(() => {
+                document.getElementById(suggestionsContainerId).classList.add('hidden');
+            }, 100);
+        };
+
+        // Function to start live navigation
+        window.startNavigation = function() {
+            if (!currentSelectedRoute) {
+                window.showToast("Please select a route before starting navigation!");
+                return;
+            }
+
+            window.showScreen('screen9'); 
+            window.initializeNavMap(); // Initialize the navigation map
+
+            // Initialize navigation screen elements
+            document.getElementById('nav-estimated-time').textContent = currentSelectedRoute.time;
+            document.getElementById('nav-current-location').textContent = `Navigating to ${document.getElementById('destination-input-2').value}`;
+            
+            // Add route polyline to navigation map
+            if (navRoutePolyline) navRoutePolyline.remove();
+            navRoutePolyline = L.polyline(currentSelectedRoute.path, {color: 'var(--primary-green)', weight: 6, opacity: 0.7}).addTo(navMap);
+            navMap.fitBounds(navRoutePolyline.getBounds()); // Zoom to fit the route
+
+            // Add current location marker to navigation map
+            if (navCurrentLocationMarker) navCurrentLocationMarker.remove();
+            navCurrentLocationMarker = L.marker(currentSelectedRoute.path[0], {
+                icon: L.divIcon({
+                    className: 'custom-div-icon',
+                    html: '<i class="fas fa-car text-blue-500 text-2xl"></i>', // Car icon for navigation
+                    iconSize: [24, 24],
+                    iconAnchor: [12, 24]
+                })
+            }).addTo(navMap);
+
+            let currentPathIndex = 0;
+            const totalPathSegments = currentSelectedRoute.path.length - 1;
+            const totalDurationMinutes = parseInt(currentSelectedRoute.time);
+            let simulatedTimeElapsed = 0;
+
+            // Simulate navigation progress and updates
+            navigationInterval = setInterval(() => {
+                simulatedTimeElapsed++;
+                
+                // Advance along the path
+                if (currentPathIndex < totalPathSegments) {
+                    currentPathIndex++;
+                    const nextLatLng = currentSelectedRoute.path[currentPathIndex];
+                    navCurrentLocationMarker.setLatLng(nextLatLng);
+                    navMap.panTo(nextLatLng); // Keep map centered on current location
+                }
+
+                const currentProgress = (simulatedTimeElapsed / totalDurationMinutes) * 100;
+
+                if (currentProgress >= 100) {
+                    clearInterval(navigationInterval);
+                    window.endTrip(currentSelectedRoute); // Pass the route data to endTrip
+                    return;
+                }
+
+                // Simulate dynamic AQI and Traffic during navigation
+                const randomAqi = Math.floor(Math.random() * (currentSelectedRoute.aqi + 50 - (currentSelectedRoute.aqi - 50) + 1)) + (currentSelectedRoute.aqi - 50);
+                document.getElementById('nav-live-aqi-value').textContent = Math.max(30, randomAqi); // Ensure AQI doesn't go too low
+                const navAqiDot = document.getElementById('nav-live-aqi-dot');
+                if (randomAqi < 100) {
+                    navAqiDot.className = 'aqi-dot bg-green-500';
+                } else if (randomAqi < 150) {
+                    navAqiDot.className = 'aqi-dot bg-orange-500';
+                } else {
+                    navAqiDot.className = 'aqi-dot bg-red-500';
+                }
+
+                const trafficLevels = ['Light', 'Moderate', 'Heavy'];
+                const trafficColors = ['traffic-green', 'traffic-yellow', 'traffic-red'];
+                const randomTrafficIndex = Math.floor(Math.random() * trafficLevels.length);
+                document.getElementById('nav-live-traffic-text').textContent = `Live Traffic: ${trafficLevels[randomTrafficIndex]}`;
+                document.getElementById('nav-live-traffic-dot').className = `traffic-light ${trafficColors[randomTrafficIndex]}`;
+
+                // Simulate remaining time decreasing
+                const remainingTime = Math.max(0, totalDurationMinutes - simulatedTimeElapsed);
+                document.getElementById('nav-estimated-time').textContent = `${remainingTime} min`;
+
+            }, 1000); // Update every 1 second
+        };
+
+        // Function to end the live navigation trip
+        window.endTrip = async function(completedRoute = currentSelectedRoute) {
+            clearInterval(navigationInterval); // Stop the navigation simulation
+            window.showToast("Trip ended!");
+            
+            // Display trip summary
+            if (completedRoute) {
+                document.getElementById('summary-co2').textContent = completedRoute.co2;
+                document.getElementById('summary-distance').textContent = completedRoute.distance;
+                document.getElementById('summary-duration').textContent = completedRoute.time;
+
+                // Save trip to history
+                if (window.isAuthReady && window.userId && window.db) {
+                    try {
+                        // Create a copy of the route data to modify for saving
+                        const tripToSave = { ...completedRoute };
+                        // Serialize the 'path' array to a JSON string
+                        tripToSave.path = JSON.stringify(tripToSave.path);
+
+                        await addDoc(collection(window.db, `artifacts/${__app_id}/users/${window.userId}/tripHistory`), {
+                            ...tripToSave, // Use the modified tripToSave object
+                            destination: document.getElementById('destination-input-2').value, // Add actual destination
+                            timestamp: Date.now() // Add timestamp for sorting
+                        });
+                        console.log("Trip saved to history:", tripToSave);
+                    } catch (e) {
+                        console.error("Error saving trip to history: ", e);
+                        window.showToast('Error saving trip history.');
+                    }
+                }
+            } else {
+                // Fallback for manual end trip without a selected route
+                document.getElementById('summary-co2').textContent = 'N/A';
+                document.getElementById('summary-distance').textContent = 'N/A';
+                document.getElementById('summary-duration').textContent = 'N/A';
+            }
+            // Navigate to the correct Trip Summary screen, which is screen10.
+            window.showScreen('screen10'); 
+        };
+
+        // Function to draw the 6-hour forecast chart on canvas
+        window.drawForecastChart = function() {
+            const canvas = document.getElementById('forecast-chart');
+            if (!canvas) return; // Exit if canvas element is not found
+            
+            const ctx = canvas.getContext('2d');
+            const container = canvas.parentElement;
+
+            // Set canvas dimensions to match container, for responsiveness
+            canvas.width = container.offsetWidth;
+            canvas.height = container.offsetHeight;
+
+            // Clear previous drawings
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Dummy data for AQI and Traffic over 6 hours (0, 1, 2, 3, 4, 5 hours from now)
+            // Generate more realistic fluctuating data
+            const generateFluctuatingData = (base, range, count) => {
+                const data = [];
+                for (let i = 0; i < count; i++) {
+                    data.push(Math.max(50, Math.floor(base + (Math.random() - 0.5) * range * 2)));
+                }
+                return data;
+            };
+
+            const aqiData = generateFluctuatingData(120, 30, 6); // AQI between 90 and 150
+            const trafficData = [
+                Math.floor(Math.random() * 3), // Now (0=Light, 1=Moderate, 2=Heavy)
+                Math.floor(Math.random() * 3),
+                Math.floor(Math.random() * 3),
+                Math.floor(Math.random() * 3),
+                Math.floor(Math.random() * 3),
+                Math.floor(Math.random() * 3)
+            ];
+
+            const labels = ["Now", "+1H", "+2H", "+3H", "+4H", "+5H"];
+
+            // Chart dimensions and padding
+            const padding = 30;
+            const chartWidth = canvas.width - 2 * padding;
+            const chartHeight = canvas.height - 2 * padding - 20; // Extra space for bottom labels
+
+            // AQI scale
+            const maxAqi = Math.max(...aqiData) + 20; // Add some buffer
+            const minAqi = Math.min(...aqiData) - 20; // Subtract some buffer
+            const aqiRange = maxAqi - minAqi;
+
+            // Traffic scale (0-2 for Light, Moderate, Heavy)
+            const maxTraffic = 2; // Max value for trafficData (0, 1, 2)
+
+            // Draw AQI Line
+            ctx.beginPath();
+            ctx.strokeStyle = '#3B82F6'; // Accent blue for AQI
+            ctx.lineWidth = 3; // Thicker line
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.shadowColor = 'rgba(59, 130, 246, 0.4)';
+            ctx.shadowBlur = 10;
+
+            aqiData.forEach((aqi, index) => {
+                const x = padding + (index / (aqiData.length - 1)) * chartWidth;
+                const y = padding + chartHeight - ((aqi - minAqi) / aqiRange) * chartHeight;
+                if (index === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+
+            // Draw AQI points and values
+            aqiData.forEach((aqi, index) => {
+                const x = padding + (index / (aqiData.length - 1)) * chartWidth;
+                const y = padding + chartHeight - ((aqi - minAqi) / aqiRange) * chartHeight;
+                
+                ctx.beginPath();
+                ctx.arc(x, y, 5, 0, Math.PI * 2); // Larger dots
+                ctx.fillStyle = '#3B82F6'; // Blue dot
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // AQI Value Text
+                ctx.fillStyle = '#1F2937'; // Darker text for readability
+                ctx.font = '600 12px Inter'; // Bolder font
+                ctx.textAlign = 'center';
+                ctx.fillText(aqi, x, y - 15); // Position above dot
+            });
+
+            // Draw Traffic Line (dashed)
+            ctx.beginPath();
+            ctx.strokeStyle = '#F59E0B'; // Accent yellow for Traffic
+            ctx.lineWidth = 3; // Thicker line
+            ctx.setLineDash([8, 5]); // Longer dashes
+            ctx.shadowColor = 'rgba(245, 158, 11, 0.4)';
+            ctx.shadowBlur = 10;
+
+            trafficData.forEach((traffic, index) => {
+                const x = padding + (index / (trafficData.length - 1)) * chartWidth;
+                // Scale traffic data to fit chart height, but offset to avoid overlap with AQI
+                // Traffic levels: 0 (Light), 1 (Moderate), 2 (Heavy)
+                // Map to a lower portion of the chart (e.g., 20% to 50% of height)
+                const trafficY = padding + chartHeight - (traffic / maxTraffic) * (chartHeight * 0.3) - (chartHeight * 0.1);
+
+                if (index === 0) {
+                    ctx.moveTo(x, trafficY);
+                } else {
+                    ctx.lineTo(x, trafficY);
+                }
+            });
+            ctx.stroke();
+            ctx.setLineDash([]); // Reset line dash for subsequent drawings
+
+            // Draw Traffic points and labels
+            trafficData.forEach((traffic, index) => {
+                const x = padding + (index / (trafficData.length - 1)) * chartWidth;
+                const trafficY = padding + chartHeight - (traffic / maxTraffic) * (chartHeight * 0.3) - (chartHeight * 0.1);
+
+                ctx.beginPath();
+                ctx.arc(x, trafficY, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#F59E0B'; // Yellow dot
+                ctx.fill();
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Traffic Value Text
+                const trafficLabels = ['Light', 'Moderate', 'Heavy'];
+                ctx.fillStyle = '#1F2937'; // Darker text
+                ctx.font = '600 12px Inter'; // Bolder font
+                ctx.textAlign = 'center';
+                ctx.fillText(trafficLabels[traffic], x, trafficY + 20); // Position below dot
+            });
+
+            // Draw X-axis labels (Time)
+            ctx.fillStyle = '#6B7280'; // Gray text
+            ctx.font = '12px Inter';
+            ctx.textAlign = 'center';
+            ctx.shadowBlur = 0; // Disable shadow for text
+
+            labels.forEach((label, index) => {
+                const x = padding + (index / (labels.length - 1)) * chartWidth;
+                ctx.fillText(label, x, canvas.height - 5);
+            });
+        };
+
+        // Function to populate the comparison table
+        window.populateComparisonTable = function() {
+            const tableBody = document.getElementById('comparison-table-body');
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            const metrics = [
+                { label: "Travel Time", key: "time" },
+                { label: "Distance", key: "distance" },
+                { label: "AQI Impact", key: "aqi" },
+                { label: "Fuel Consumption", key: "fuel" },
+                { label: "CO₂ Emissions", key: "co2" }
+            ];
+
+            // Iterate over each metric to create a row
+            metrics.forEach(metric => {
+                const row = document.createElement('tr');
+                let rowContent = `<td>${metric.label}</td>`;
+
+                // Iterate over each route to add data for the current metric
+                for (const routeId in dummyRoutes) {
+                    if (dummyRoutes.hasOwnProperty(routeId)) {
+                        const route = dummyRoutes[routeId];
+                        let value = route[metric.key];
+                        // Special formatting for AQI (add "AQI " prefix if not already there)
+                        if (metric.key === "aqi" && !String(value).startsWith("AQI ")) {
+                            value = `AQI ${value}`;
+                        }
+                        rowContent += `<td>${value}</td>`;
+                    }
+                }
+                row.innerHTML = rowContent;
+                tableBody.appendChild(row);
+            });
+        };
+
+        // Function to update profile statistics based on trip history
+        window.updateProfileStats = function() {
+            let totalEcoTrips = window.tripHistory.length;
+            let totalDistance = 0;
+            let totalAqiAvoided = 0; // Changed to track AQI avoided
+            let totalCo2Saved = 0;
+
+            const baselineAqi = 150; // Assume a baseline AQI for a non-eco route
+
+            window.tripHistory.forEach(trip => {
+                totalDistance += parseFloat(trip.distance.replace(' km', ''));
+                
+                const tripAqi = parseFloat(trip.aqi);
+                if (!isNaN(tripAqi)) {
+                    totalAqiAvoided += Math.max(0, baselineAqi - tripAqi); // Only add positive avoided values
+                }
+                
+                totalCo2Saved += parseFloat(trip.co2.replace(' kg CO₂', ''));
+            });
+
+            const avgAqiAvoided = totalEcoTrips > 0 ? Math.round(totalAqiAvoided / totalEcoTrips) : 0;
+
+            document.getElementById('profile-eco-trips').textContent = totalEcoTrips;
+            document.getElementById('profile-total-distance').textContent = `${totalDistance.toFixed(1)} km`;
+            document.getElementById('profile-avg-aqi').textContent = avgAqiAvoided; // Now displays avoided AQI
+            document.getElementById('profile-co2-saved').textContent = `${totalCo2Saved.toFixed(1)} kg`;
+
+            // Update the carbon tree text based on CO2 saved
+            const carbonTreeText = document.querySelector('.carbon-savings .carbon-value:last-child');
+            if (totalCo2Saved >= 5) { // Example: 5kg CO2 saved for 1 tree
+                carbonTreeText.textContent = `${Math.floor(totalCo2Saved / 5)} Tree${Math.floor(totalCo2Saved / 5) > 1 ? 's' : ''}!`;
+            } else {
+                carbonTreeText.textContent = '0 Trees yet!';
+            }
+        };
+
+        // Function to handle user logout
+        window.logoutUser = async function() {
+            if (!window.auth) {
+                window.showToast('Authentication service not available.');
+                return;
+            }
+            try {
+                await signOut(window.auth);
+                window.userId = null; // Clear userId on logout
+                window.isAuthReady = false; // Reset auth state
+                window.savedRoutes = []; // Clear saved routes
+                window.tripHistory = []; // Clear trip history
+                window.showToast('Logged out successfully!');
+                window.showScreen('screen0'); // Go back to welcome screen
+                console.log("User logged out.");
+            } catch (error) {
+                console.error("Error logging out:", error);
+                window.showToast('Error logging out. Please try again.');
+            }
+        };
+
+
+        // Initialize destination input with a default value after the DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('destination-input').value = "India Gate";
+            document.getElementById('destination-input-2').value = "India Gate";
+            window.initializeMainMap(); // Initialize the main map
+            window.drawForecastChart(); // Draw chart on initial load
+        });
+
+        // Redraw chart on window resize for responsiveness
+        window.addEventListener('resize', () => {
+            if (document.getElementById('screen1').classList.contains('active')) {
+                window.drawForecastChart();
+                if (mainMap) mainMap.invalidateSize(); // Invalidate map size on resize
+            }
+            if (document.getElementById('screen9').classList.contains('active')) {
+                if (navMap) navMap.invalidateSize(); // Invalidate map size on resize
+            }
+        });
+    </script>
+</body>
+</html>
