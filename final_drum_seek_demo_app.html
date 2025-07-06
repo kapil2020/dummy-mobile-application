@@ -1,0 +1,2524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DRUM - Dynamic Route Optimization for Urban Mobility</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary-green: #10B981;
+            --dark-green: #047857;
+            --light-green: #D1FAE5;
+            --accent-yellow: #F59E0B;
+            --accent-blue: #3B82F6;
+            --accent-red: #EF4444;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: linear-gradient(135deg, #1a2a6c, #b21f1f, #1a2a6c);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+            overflow: hidden;
+        }
+        
+        .mobile-frame {
+            width: 375px;
+            height: 667px;
+            background-color: #fff;
+            border-radius: 40px;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.5);
+            overflow: hidden;
+            position: relative;
+            border: 12px solid #111827;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .mobile-frame:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 30px 60px -10px rgba(0, 0, 0, 0.6);
+        }
+        
+        .notch {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 140px;
+            height: 30px;
+            background-color: #111827;
+            border-bottom-left-radius: 15px;
+            border-bottom-right-radius: 15px;
+            z-index: 20;
+        }
+        
+        .status-bar {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 44px;
+            background: linear-gradient(to bottom, #111827, #1F2937);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 24px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 10;
+            border-top-left-radius: 32px;
+            border-top-right-radius: 32px;
+        }
+        
+        .screen {
+            width: 100%;
+            height: 100%;
+            display: none;
+            flex-direction: column;
+            justify-content: space-between;
+            position: absolute;
+            top: 0;
+            left: 0;
+            transition: transform 0.5s cubic-bezier(0.25, 0.1, 0.25, 1), opacity 0.4s ease-out;
+            transform: translateX(100%);
+            opacity: 0;
+            overflow: hidden;
+        }
+        
+        .screen.active {
+            display: flex;
+            transform: translateX(0);
+            opacity: 1;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--primary-green), var(--dark-green));
+            color: white;
+            padding: 16px 20px;
+            padding-top: 60px;
+            border-bottom-left-radius: 20px;
+            border-bottom-right-radius: 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 5;
+        }
+        
+        .footer {
+            background: white;
+            border-top: 1px solid #E5E7EB;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+            z-index: 5;
+        }
+        
+        .button-primary {
+            background: linear-gradient(135deg, var(--primary-green), var(--dark-green));
+            color: white;
+            font-weight: 600;
+            padding: 14px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 8px rgba(16, 185, 129, 0.3);
+            transition: all 0.3s ease;
+        }
+        
+        .button-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 12px rgba(16, 185, 129, 0.4);
+        }
+        
+        .button-primary:active {
+            transform: translateY(0);
+            box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
+        }
+        
+        .button-secondary {
+            background: white;
+            color: #4B5563;
+            border: 1px solid #D1D5DB;
+            font-weight: 500;
+            padding: 12px 20px;
+            border-radius: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        .button-secondary:hover {
+            background: #F3F4F6;
+            transform: translateY(-1px);
+        }
+        
+        .input-field {
+            width: 100%;
+            padding: 14px 16px 14px 48px;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+            font-size: 15px;
+            transition: all 0.2s ease;
+            background-color: #F9FAFB;
+            color: #000; /* Changed to black for better visibility */
+        }
+        
+        .input-field:focus {
+            outline: none;
+            border-color: var(--primary-green);
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+            background-color: white;
+        }
+        
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #9CA3AF;
+            font-size: 18px;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 14px;
+            padding: 18px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            border: 1px solid #E5E7EB;
+            transition: all 0.3s ease;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        
+        .card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .card.selected {
+            border: 2px solid var(--primary-green);
+            box-shadow: 0 4px 16px rgba(16, 185, 129, 0.2);
+        }
+        
+        .map-container {
+            width: 100%;
+            height: 240px;
+            border-radius: 14px;
+            overflow: hidden;
+            position: relative;
+            background-color: #E5E7EB;
+            margin-bottom: 20px;
+        }
+        
+        .map-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.5s ease;
+            z-index: 6;
+            position: relative;
+        }
+        
+        .map-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.7), transparent);
+            padding: 16px;
+            color: white;
+            z-index: 5;
+        }
+        
+        .route-marker {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            border: 2px solid white;
+            z-index: 7;
+        }
+        
+        .route-line {
+            position: absolute;
+            height: 4px;
+            border-radius: 2px;
+            transform-origin: left center;
+            z-index: 7;
+        }
+        
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .badge-green {
+            background-color: var(--light-green);
+            color: var(--dark-green);
+        }
+        
+        .badge-yellow {
+            background-color: #FEF3C7;
+            color: #92400E;
+        }
+        
+        .badge-blue {
+            background-color: #DBEAFE;
+            color: #1E40AF;
+        }
+        
+        .badge-red {
+            background-color: #FEE2E2;
+            color: #991B1B;
+        }
+        
+        .progress-bar {
+            height: 6px;
+            border-radius: 3px;
+            background-color: #E5E7EB;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-green), var(--dark-green));
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        
+        .vehicle-option {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            background-color: #F9FAFB;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .vehicle-option.selected {
+            border-color: var(--primary-green);
+            background-color: var(--light-green);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+        }
+        
+        .vehicle-icon {
+            font-size: 36px;
+            margin-bottom: 8px;
+        }
+        
+        .priority-option {
+            display: flex;
+            align-items: center;
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            background-color: #F9FAFB;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .priority-option.selected {
+            border-color: var(--primary-green);
+            background-color: var(--light-green);
+        }
+        
+        .priority-icon {
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            color: var(--primary-green);
+        }
+        
+        .eco-badge {
+            margin-left: 8px;
+            background-color: var(--light-green);
+            color: var(--dark-green);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .route-details {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 13px;
+            color: #6B7280;
+        }
+        
+        .route-detail-item {
+            display: flex;
+            align-items: center;
+        }
+        
+        .route-detail-icon {
+            margin-right: 4px;
+            color: #9CA3AF;
+        }
+        
+        .impact-meter {
+            width: 100%;
+            height: 8px;
+            border-radius: 4px;
+            background-color: #E5E7EB;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .impact-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-green), var(--dark-green));
+            border-radius: 4px;
+        }
+        
+        .nav-tab {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 8px 0;
+            color: #9CA3AF;
+            font-size: 12px;
+            transition: all 0.2s ease;
+        }
+        
+        .nav-tab.active {
+            color: var(--primary-green);
+        }
+        
+        .nav-icon {
+            font-size: 20px;
+            margin-bottom: 4px;
+        }
+        
+        .aqi-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background-color: rgba(255, 255, 255, 0.9);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            z-index: 8;
+        }
+        
+        .aqi-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            margin-right: 6px;
+        }
+        
+        .time-pill {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+            z-index: 8;
+        }
+        
+        .loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .slide-up {
+            animation: slideUp 0.5s ease-out forwards;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+        
+        .traffic-light {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        
+        .traffic-green { background-color: #10B981; }
+        .traffic-yellow { background-color: #F59E0B; }
+        .traffic-red { background-color: #EF4444; }
+
+        .toast-message {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            opacity: 0;
+            transition: opacity 0.3s ease-in-out;
+            z-index: 100;
+            white-space: nowrap;
+        }
+        .toast-message.show {
+            opacity: 1;
+        }
+
+        .hotspot {
+            position: absolute;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: white;
+            opacity: 0.8;
+            transition: all 0.5s ease;
+            box-shadow: 0 0 8px rgba(0,0,0,0.3);
+            z-index: 7;
+        }
+        .hotspot.aqi-good { background-color: #10B981; }
+        .hotspot.aqi-moderate { background-color: #F59E0B; }
+        .hotspot.aqi-poor { background-color: #EF4444; }
+        .hotspot.traffic-light { border: 2px solid #10B981; }
+        .hotspot.traffic-moderate { border: 2px solid #F59E0B; }
+        .hotspot.traffic-heavy { border: 2px solid #EF4444; }
+
+        .autocomplete-suggestions {
+            position: absolute;
+            background-color: white;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            max-height: 150px;
+            overflow-y: auto;
+            width: calc(100% - 40px);
+            left: 20px;
+            right: 20px;
+            z-index: 50;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-top: 5px;
+        }
+        .autocomplete-suggestion-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            font-size: 15px;
+            color: #374151;
+        }
+        .autocomplete-suggestion-item:hover {
+            background-color: #F3F4F6;
+        }
+        
+        /* Route Visualization */
+        .route-visualization {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 4;
+        }
+        
+        .route-step {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--accent-blue);
+            border: 2px solid white;
+            z-index: 5;
+        }
+        
+        .route-path {
+            position: absolute;
+            height: 4px;
+            background-color: var(--accent-blue);
+            border-radius: 2px;
+            transform-origin: left center;
+            z-index: 4;
+        }
+        
+        .route-info-window {
+            position: absolute;
+            background: white;
+            padding: 8px 12px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            font-size: 12px;
+            z-index: 10;
+            max-width: 150px;
+        }
+        
+        /* Forecast chart styles */
+        .chart-container {
+            position: relative;
+            height: 180px;
+            margin-top: 15px;
+        }
+        
+        .chart-controls {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+            gap: 10px;
+        }
+        
+        .chart-btn {
+            background-color: #F3F4F6;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .chart-btn.active {
+            background-color: var(--primary-green);
+            color: white;
+        }
+        
+        .legend-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+            gap: 20px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            font-size: 12px;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            margin-right: 5px;
+        }
+        
+        .time-labels {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 12px;
+            color: #6B7280;
+        }
+        
+        .traffic-indicators {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 5px;
+            padding: 0 5px;
+        }
+        
+        .traffic-indicator {
+            text-align: center;
+            width: 16.66%;
+        }
+        
+        /* New styles */
+        .impact-chart {
+            display: flex;
+            align-items: flex-end;
+            height: 80px;
+            margin-top: 15px;
+        }
+        
+        .impact-bar {
+            flex: 1;
+            margin: 0 4px;
+            background: linear-gradient(to top, var(--primary-green), var(--dark-green));
+            border-radius: 4px 4px 0 0;
+            position: relative;
+        }
+        
+        .impact-label {
+            position: absolute;
+            bottom: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 10px;
+            color: #6B7280;
+        }
+        
+        .impact-value {
+            position: absolute;
+            top: -20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        
+        .traffic-legend {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        
+        .vehicle-option {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #E5E7EB;
+            background-color: #F9FAFB;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .vehicle-option.selected {
+            border-color: var(--primary-green);
+            background-color: var(--light-green);
+            box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+        }
+        
+        .saved-route-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+        }
+        
+        .action-button {
+            flex: 1;
+            padding: 8px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            margin: 0 4px;
+            cursor: pointer;
+        }
+        
+        .action-button.share {
+            background-color: #DBEAFE;
+            color: #1E40AF;
+        }
+        
+        .action-button.navigate {
+            background-color: var(--light-green);
+            color: var(--dark-green);
+        }
+        
+        .action-button.delete {
+            background-color: #FEE2E2;
+            color: #991B1B;
+        }
+        
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background-color: var(--accent-red);
+            color: white;
+            font-size: 10px;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .profile-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 15px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+            text-align: center;
+        }
+        
+        .stat-value {
+            font-size: 24px;
+            font-weight: 700;
+            margin: 5px 0;
+            color: var(--dark-green);
+        }
+        
+        .stat-label {
+            font-size: 12px;
+            color: #6B7280;
+        }
+        
+        .carbon-savings {
+            position: relative;
+            height: 120px;
+            margin: 20px 0;
+        }
+        
+        .carbon-tree {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 40px;
+            color: var(--primary-green);
+        }
+        
+        .carbon-value {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            text-align: center;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--dark-green);
+        }
+        
+        .setting-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .4s;
+            border-radius: 24px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 16px;
+            width: 16px;
+            left: 4px;
+            bottom: 4px;
+            background-color: white;
+            transition: .4s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: var(--primary-green);
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+        
+        .notification-item {
+            display: flex;
+            padding: 12px;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        
+        .notification-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            flex-shrink: 0;
+        }
+        
+        .notification-info {
+            flex: 1;
+        }
+        
+        .notification-time {
+            font-size: 11px;
+            color: #9CA3AF;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="mobile-frame">
+        <div class="notch"></div>
+        <div class="status-bar">
+            <span id="current-time">9:41 AM</span>
+            <div class="flex items-center space-x-2">
+                <i class="fas fa-signal"></i>
+                <i class="fas fa-wifi"></i>
+                <i class="fas fa-battery-full"></i>
+            </div>
+        </div>
+
+        <!-- Screen 0: Welcome Screen -->
+        <div id="screen0" class="screen active" style="transform: translateX(0); opacity: 1;">
+            <div class="flex-1 flex flex-col items-center justify-center text-center p-5 bg-gradient-to-br from-green-500 to-green-700 text-white">
+                <div class="relative mb-8">
+                    <i class="fas fa-leaf text-8xl mb-4 animate-bounce" style="animation-duration: 2s;"></i>
+                    <div class="absolute -inset-4 bg-green-400 rounded-full opacity-20 blur-lg"></div>
+                </div>
+                <h1 class="text-4xl font-extrabold mb-4 drop-shadow-lg">DRUM</h1>
+                <p class="text-xl mb-8 font-light max-w-xs">Dynamic Route Optimization for Sustainable Urban Mobility</p>
+                <button class="button-primary text-xl px-8 py-4 animate-pulse flex items-center" onclick="showScreen('screen1')">
+                    Get Started <i class="fas fa-arrow-right ml-2"></i>
+                </button>
+            </div>
+            <div class="footer bg-gray-800 text-white p-4 text-center text-sm rounded-t-none">
+                <p>Developed by IIT Kharagpur Research Team</p>
+                <p class="text-gray-400 mt-1">Reducing urban emissions one route at a time</p>
+            </div>
+        </div>
+
+        <!-- Screen 1: Home/Map View -->
+        <div id="screen1" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen5')">
+                        <i class="fas fa-user"></i>
+                    </button>
+                    <h1 class="text-xl font-bold flex items-center">
+                        <i class="fas fa-leaf mr-2"></i> DRUM
+                    </h1>
+                    <button class="text-white text-xl relative" onclick="showScreen('screen6')">
+                        <i class="fas fa-bell"></i>
+                        <span class="notification-badge">3</span>
+                    </button>
+                </div>
+                
+                <div class="mt-4 relative">
+                    <i class="input-icon fas fa-location-dot"></i>
+                    <input type="text" placeholder="Where to?" class="input-field pl-12" id="destination-input" onkeyup="showSuggestions(this, 'suggestions1')" onfocus="showSuggestions(this, 'suggestions1')" onblur="hideSuggestions('suggestions1')">
+                    <div id="suggestions1" class="autocomplete-suggestions hidden"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="map-container relative">
+                    <img src="https://tile.openstreetmap.org/12/2670/1628.png" alt="OpenStreetMap of Delhi" class="map-image" id="main-map-image">
+                    
+                    <!-- Route Visualization -->
+                    <div class="route-visualization" id="route-visualization">
+                        <div class="route-step" style="top: 40%; left: 20%;"></div>
+                        <div class="route-step" style="top: 60%; left: 80%;"></div>
+                        <div class="route-path" style="top: 40%; left: 20%; width: 60%; transform: rotate(20deg);"></div>
+                        <div class="route-info-window" style="top: 30%; left: 50%;">
+                            <div class="font-semibold">Rajiv Chowk</div>
+                            <div class="text-xs">Traffic: Moderate</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Hotspots -->
+                    <div id="hotspots-container">
+                        <div class="hotspot" id="hotspot1" style="width: 30px; height: 30px; top: 20%; left: 30%;"></div>
+                        <div class="hotspot" id="hotspot2" style="width: 35px; height: 35px; top: 50%; left: 60%;"></div>
+                        <div class="hotspot" id="hotspot3" style="width: 25px; height: 25px; top: 70%; left: 15%;"></div>
+                        <div class="hotspot" id="hotspot4" style="width: 40px; height: 40px; top: 40%; left: 80%;"></div>
+                    </div>
+
+                    <div class="map-overlay">
+                        <div class="flex justify-between items-end">
+                            <div>
+                                <div class="text-white font-semibold">Current Location</div>
+                                <div class="text-sm text-gray-200">Connaught Place, Delhi</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="flex items-center justify-end">
+                                    <span class="traffic-light traffic-yellow" id="live-traffic-dot"></span>
+                                    <span class="text-xs text-gray-200" id="live-traffic-text">Live Traffic: Moderate</span>
+                                </div>
+                                <div class="text-white font-bold text-lg" id="live-travel-time">45 min</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="aqi-indicator">
+                        <span class="aqi-dot bg-orange-500" id="live-aqi-dot"></span>
+                        <span>Live AQI: <span id="live-aqi-value">125</span></span>
+                    </div>
+                    <div class="time-pill">Live</div>
+                </div>
+
+                <button class="button-primary w-full mb-6 flex items-center justify-center" onclick="showScreen('screen2')">
+                    <i class="fas fa-route mr-2"></i> Plan Eco Route
+                </button>
+
+                <!-- Enhanced 6-hour forecast section -->
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-6">
+                    <h3 class="font-bold text-lg mb-3 flex items-center">
+                        <i class="fas fa-chart-line text-blue-500 mr-2"></i> 6-Hour Forecast
+                    </h3>
+                    
+                    <div class="chart-container">
+                        <canvas id="forecastChart"></canvas>
+                    </div>
+                    
+                    <div class="chart-controls">
+                        <button class="chart-btn active" data-metric="aqi">AQI</button>
+                        <button class="chart-btn" data-metric="traffic">Traffic</button>
+                        <button class="chart-btn" data-metric="both">Both</button>
+                    </div>
+                    
+                    <div class="legend-container">
+                        <div class="legend-item">
+                            <div class="legend-color bg-red-500"></div>
+                            <span>Air Quality (AQI)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color bg-blue-500"></div>
+                            <span>Traffic Index</span>
+                        </div>
+                    </div>
+                    
+                    <div class="time-labels">
+                        <span>Now</span>
+                        <span>+1H</span>
+                        <span>+2H</span>
+                        <span>+3H</span>
+                        <span>+4H</span>
+                        <span>+5H</span>
+                    </div>
+                    
+                    <div class="traffic-indicators">
+                        <div class="traffic-indicator">
+                            <span class="traffic-light traffic-yellow"></span>
+                        </div>
+                        <div class="traffic-indicator">
+                            <span class="traffic-light traffic-red"></span>
+                        </div>
+                        <div class="traffic-indicator">
+                            <span class="traffic-light traffic-red"></span>
+                        </div>
+                        <div class="traffic-indicator">
+                            <span class="traffic-light traffic-yellow"></span>
+                        </div>
+                        <div class="traffic-indicator">
+                            <span class="traffic-light traffic-green"></span>
+                        </div>
+                        <div class="traffic-indicator">
+                            <span class="traffic-light traffic-green"></span>
+                        </div>
+                    </div>
+                    
+                    <div class="mt-4 text-sm text-gray-600">
+                        <p><i class="fas fa-info-circle text-blue-500 mr-2"></i> Forecast shows expected air quality and traffic conditions for the next 6 hours</p>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                    <h3 class="font-bold text-lg mb-3 flex items-center">
+                        <i class="fas fa-seedling text-green-500 mr-2"></i> Your Green Impact
+                    </h3>
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm text-gray-600">This week's CO₂ savings</span>
+                        <span class="font-bold text-green-600">2.8 kg</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 55%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>0 kg</span>
+                        <span>5 kg goal</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-3 gap-4 mt-4">
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">9</div>
+                            <div class="text-xs text-gray-500">Eco Trips</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">35 km</div>
+                            <div class="text-xs text-gray-500">Distance</div>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-2xl font-bold text-green-600">110</div>
+                            <div class="text-xs text-gray-500">Avg AQI</div>
+                        </div>
+                    </div>
+                    
+                    <div class="carbon-savings mt-6">
+                        <div class="carbon-tree">
+                            <i class="fas fa-tree"></i>
+                        </div>
+                        <div class="carbon-value">Equivalent to 2.3 trees saved</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer">
+                <div class="flex justify-around py-3">
+                    <button class="nav-tab active" onclick="showScreen('screen1')">
+                        <i class="nav-icon fas fa-map-marked-alt"></i>
+                        <span>Map</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen4')">
+                        <i class="nav-icon fas fa-star"></i>
+                        <span>Saved</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen7')">
+                        <i class="nav-icon fas fa-history"></i>
+                        <span>History</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen5')">
+                        <i class="nav-icon fas fa-user"></i>
+                        <span>Profile</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen 2: Route Input & Preferences -->
+        <div id="screen2" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Route Preferences</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Start Location</label>
+                    <div class="relative">
+                        <i class="input-icon fas fa-location-dot"></i>
+                        <input type="text" class="input-field pl-12" value="Current Location" id="start-location-input">
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-2">Destination</label>
+                    <div class="relative">
+                        <i class="input-icon fas fa-map-marker-alt"></i>
+                        <input type="text" class="input-field pl-12" id="destination-input-2" onkeyup="showSuggestions(this, 'suggestions2')" onfocus="showSuggestions(this, 'suggestions2')" onblur="hideSuggestions('suggestions2')">
+                        <div id="suggestions2" class="autocomplete-suggestions hidden"></div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Vehicle Type</label>
+                    <div class="grid grid-cols-2 gap-3"> <!-- Changed from grid-cols-3 to grid-cols-2 -->
+                        <div class="vehicle-option selected" onclick="selectVehicle(this, 'car')" data-vehicle="car">
+                            <div class="vehicle-icon">🚗</div>
+                            <div class="font-medium">Car</div>
+                            <div class="text-xs text-gray-500 mt-1">Petrol/Diesel</div>
+                        </div>
+                        <div class="vehicle-option" onclick="selectVehicle(this, 'two_wheeler')" data-vehicle="two_wheeler">
+                            <div class="vehicle-icon">🏍️</div>
+                            <div class="font-medium">Two Wheeler</div>
+                            <div class="text-xs text-gray-500 mt-1">150cc</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-6">
+                    <label class="block text-sm font-medium text-gray-700 mb-3">Route Priority</label>
+                    <div class="space-y-3">
+                        <div class="priority-option" onclick="selectPriorityOption(this, 'fastest')" data-priority="fastest">
+                            <div class="priority-icon">
+                                <i class="fas fa-bolt"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">Fastest Route</div>
+                                <div class="text-xs text-gray-500">Least travel time</div>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="selectPriorityOption(this, 'shortest')" data-priority="shortest">
+                            <div class="priority-icon">
+                                <i class="fas fa-route"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">Shortest Distance</div>
+                                <div class="text-xs text-gray-500">Fewest kilometers</div>
+                            </div>
+                        </div>
+                        <div class="priority-option selected" onclick="selectPriorityOption(this, 'leap')" data-priority="leap">
+                            <div class="priority-icon">
+                                <i class="fas fa-wind"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">LEAP Route</div>
+                                <div class="text-xs text-gray-500">Least air pollution</div>
+                                <span class="eco-badge">ECO</span>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="selectPriorityOption(this, 'lecr')" data-priority="lecr">
+                            <div class="priority-icon">
+                                <i class="fas fa-battery-three-quarters"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">LECR Route</div>
+                                <div class="text-xs text-gray-500">Least energy use</div>
+                                <span class="eco-badge">ECO</span>
+                            </div>
+                        </div>
+                        <div class="priority-option" onclick="selectPriorityOption(this, 'suggested')" data-priority="suggested">
+                            <div class="priority-icon">
+                                <i class="fas fa-star"></i>
+                            </div>
+                            <div>
+                                <div class="font-medium">Suggested Route</div>
+                                <div class="text-xs text-gray-500">Balanced for Time & Impact</div>
+                                <span class="eco-badge">Optimal</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-blue-50 rounded-xl p-4 mb-6">
+                    <div class="flex items-start">
+                        <div class="bg-blue-100 p-2 rounded-lg mr-3">
+                            <i class="fas fa-cloud-sun text-blue-500"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-medium text-blue-800">Weather & Traffic Forecast</h4>
+                            <p class="text-sm text-blue-600">Clear skies with moderate traffic expected. Avoid peak hours for smoother travel.</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-green-50 rounded-xl p-4">
+                    <div class="flex items-start">
+                        <div class="bg-green-100 p-2 rounded-lg mr-3">
+                            <i class="fas fa-leaf text-green-500"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-medium text-green-800">Eco Impact Estimate</h4>
+                            <div class="grid grid-cols-3 gap-3 mt-2">
+                                <div class="text-center">
+                                    <div class="font-bold text-green-600">1.2 kg</div>
+                                    <div class="text-xs text-green-700">CO₂ Saved</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="font-bold text-green-600">0.8 L</div>
+                                    <div class="text-xs text-green-700">Fuel Saved</div>
+                                </div>
+                                <div class="text-center">
+                                    <div class="font-bold text-green-600">+15%</div>
+                                    <div class="text-xs text-green-700">AQI Improved</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-primary w-full pulse" onclick="findRoutes()">
+                    <span id="find-routes-text">Find Eco Routes</span>
+                    <span id="finding-routes" class="hidden flex items-center justify-center">
+                        <i class="fas fa-spinner fa-spin mr-2"></i> Finding routes...
+                    </span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Screen 3: Route Options/Results -->
+        <div id="screen3" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen2')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Route Options</h1>
+                    <div class="w-6"></div>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5">
+                <div class="flex items-center justify-between mb-4">
+                    <div>
+                        <div class="text-sm text-gray-500" id="route-destination-display">India Gate</div>
+                        <div class="font-medium" id="route-options-count">5 route options</div>
+                    </div>
+                    <div class="flex items-center">
+                        <span class="traffic-light traffic-yellow mr-1"></span>
+                        <span class="text-xs text-gray-500">Live Traffic</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 1: Shortest Route -->
+                <div class="card slide-up" onclick="selectRoute(this, 'shortest')" data-route-id="shortest" style="animation-delay: 0.1s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Shortest Route</h3>
+                            <div class="text-sm text-gray-500">Via Barakhamba Road</div>
+                        </div>
+                        <span class="badge badge-yellow route-recommendation-badge">Shortest</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">40 min</span> 
+                        <span class="text-sm text-gray-500">(11.0 km)</span> 
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 150</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.1 L</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.7 kg CO₂</span> 
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 55%"></div> 
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 2: Fastest Route -->
+                <div class="card slide-up" onclick="selectRoute(this, 'fastest')" data-route-id="fastest" style="animation-delay: 0.2s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Fastest Route</h3>
+                            <div class="text-sm text-gray-500">Via Ring Road</div>
+                        </div>
+                        <span class="badge badge-yellow route-recommendation-badge">Fastest</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">38 min</span>
+                        <span class="text-sm text-gray-500">(12.5 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 145</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.2 L</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.8 kg CO₂</span>
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 60%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 3: LEAP -->
+                <div class="card slide-up selected" onclick="selectRoute(this, 'leap')" data-route-id="leap" style="animation-delay: 0.3s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">LEAP Route</h3>
+                            <div class="text-sm text-gray-500">Via Outer Ring Road</div>
+                        </div>
+                        <span class="badge badge-green route-recommendation-badge">Recommended</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">45 min</span>
+                        <span class="text-sm text-gray-500">(14.0 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 105</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.5 L</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.5 kg CO₂</span>
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 80%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                    
+                    <div class="mt-4">
+                        <h4 class="font-medium mb-2">Environmental Benefits</h4>
+                        <div class="impact-chart">
+                            <div class="impact-bar" style="height: 40%">
+                                <div class="impact-value">1.8kg</div>
+                                <div class="impact-label">Fastest</div>
+                            </div>
+                            <div class="impact-bar" style="height: 45%">
+                                <div class="impact-value">1.7kg</div>
+                                <div class="impact-label">Shortest</div>
+                            </div>
+                            <div class="impact-bar" style="height: 30%">
+                                <div class="impact-value">1.5kg</div>
+                                <div class="impact-label">LEAP</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Route Option 4: LECR -->
+                <div class="card slide-up" onclick="selectRoute(this, 'lecr')" data-route-id="lecr" style="animation-delay: 0.4s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">LECR Route</h3>
+                            <div class="text-sm text-gray-500">Via Mathura Road</div>
+                        </div>
+                        <span class="badge badge-blue route-recommendation-badge">Eco</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">42 min</span>
+                        <span class="text-sm text-gray-500">(13.0 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 130</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.0 L</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.2 kg CO₂</span>
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 90%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+
+                <!-- Route Option 5: Suggested Route (Mix of all) -->
+                <div class="card slide-up" onclick="selectRoute(this, 'suggested')" data-route-id="suggested" style="animation-delay: 0.5s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Suggested Route</h3>
+                            <div class="text-sm text-gray-500">Balanced for Time & Impact</div>
+                        </div>
+                        <span class="badge badge-blue route-recommendation-badge">Optimal</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-2xl font-bold mr-2">41 min</span> 
+                        <span class="text-sm text-gray-500">(13.5 km)</span> 
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 120</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-gas-pump"></i>
+                            <span>1.3 L</span> 
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.4 kg CO₂</span> 
+                        </div>
+                    </div>
+                    <div class="impact-meter mt-3">
+                        <div class="impact-fill" style="width: 70%"></div> 
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>Worst</span>
+                        <span>Best</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-primary w-full mb-3" onclick="saveSelectedRoute()">
+                    Save Route
+                </button>
+                <button class="button-secondary w-full" onclick="showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+            <div id="toast-message" class="toast-message"></div>
+        </div>
+
+        <!-- Screen 4: Saved Routes -->
+        <div id="screen4" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Saved Routes</h1>
+                    <button class="text-white text-xl">
+                        <i class="fas fa-filter"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5" id="saved-routes-list">
+                <div class="card slide-up" style="animation-delay: 0.1s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Home to Office</h3>
+                            <div class="text-sm text-gray-500">Via Outer Ring Road</div>
+                        </div>
+                        <span class="badge badge-green">Eco</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-xl font-bold mr-2">45 min</span>
+                        <span class="text-sm text-gray-500">(14.0 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 105</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>1.5 kg CO₂</span>
+                        </div>
+                    </div>
+                    
+                    <div class="saved-route-actions">
+                        <div class="action-button share" onclick="shareRoute('Home to Office')">
+                            <i class="fas fa-share-alt mr-1"></i> Share
+                        </div>
+                        <div class="action-button navigate" onclick="navigateToRoute('leap')">
+                            <i class="fas fa-directions mr-1"></i> Navigate
+                        </div>
+                        <div class="action-button delete" onclick="deleteRoute(this)">
+                            <i class="fas fa-trash mr-1"></i> Delete
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card slide-up" style="animation-delay: 0.2s">
+                    <div class="flex justify-between items-start mb-2">
+                        <div>
+                            <h3 class="font-bold text-lg">Office to Gym</h3>
+                            <div class="text-sm text-gray-500">Via Mathura Road</div>
+                        </div>
+                        <span class="badge badge-blue">Optimal</span>
+                    </div>
+                    <div class="flex items-center mb-2">
+                        <span class="text-xl font-bold mr-2">25 min</span>
+                        <span class="text-sm text-gray-500">(8.5 km)</span>
+                    </div>
+                    <div class="route-details">
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-smog"></i>
+                            <span>AQI 115</span>
+                        </div>
+                        <div class="route-detail-item">
+                            <i class="route-detail-icon fas fa-leaf"></i>
+                            <span>0.8 kg CO₂</span>
+                        </div>
+                    </div>
+                    
+                    <div class="saved-route-actions">
+                        <div class="action-button share" onclick="shareRoute('Office to Gym')">
+                            <i class="fas fa-share-alt mr-1"></i> Share
+                        </div>
+                        <div class="action-button navigate" onclick="navigateToRoute('suggested')">
+                            <i class="fas fa-directions mr-1"></i> Navigate
+                        </div>
+                        <div class="action-button delete" onclick="deleteRoute(this)">
+                            <i class="fas fa-trash mr-1"></i> Delete
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="text-center text-gray-500 mt-10" id="no-saved-routes-message" style="display: none;">
+                    No routes saved yet. Plan a route to save it here!
+                </div>
+            </div>
+
+            <div class="footer p-5">
+                <button class="button-secondary w-full" onclick="showScreen('screen1')">
+                    Back to Map
+                </button>
+            </div>
+        </div>
+        
+        <!-- Screen 5: User Profile -->
+        <div id="screen5" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">My Profile</h1>
+                    <button class="text-white text-xl">
+                        <i class="fas fa-cog"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-5 bg-gray-50">
+                <div class="flex flex-col items-center mb-6">
+                    <div class="relative mb-4">
+                        <img src="https://randomuser.me/api/portraits/men/32.jpg" alt="Profile" class="w-24 h-24 rounded-full border-4 border-white shadow-lg">
+                        <div class="absolute bottom-0 right-0 bg-green-500 text-white rounded-full p-1">
+                            <i class="fas fa-leaf text-xs"></i>
+                        </div>
+                    </div>
+                    <h2 class="text-xl font-bold">Rahul Sharma</h2>
+                    <p class="text-gray-500">Delhi, India</p>
+                    <div class="mt-2">
+                        <span class="badge badge-green">Eco Champion</span>
+                    </div>
+                </div>
+                
+                <div class="profile-stats">
+                    <div class="stat-card">
+                        <i class="fas fa-route text-green-500 text-xl"></i>
+                        <div class="stat-value">126</div>
+                        <div class="stat-label">Total Trips</div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-tree text-green-500 text-xl"></i>
+                        <div class="stat-value">28.5</div>
+                        <div class="stat-label">kg CO₂ Saved</div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-road text-green-500 text-xl"></i>
+                        <div class="stat-value">412</div>
+                        <div class="stat-label">km Traveled</div>
+                    </div>
+                    <div class="stat-card">
+                        <i class="fas fa-medal text-green-500 text-xl"></i>
+                        <div class="stat-value">87%</div>
+                        <div class="stat-label">Eco Routes</div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mt-6">
+                    <h3 class="font-bold text-lg mb-4">Carbon Savings</h3>
+                    <div class="carbon-savings">
+                        <div class="carbon-tree">
+                            <i class="fas fa-tree"></i>
+                        </div>
+                        <div class="carbon-value">Equivalent to 23 trees saved</div>
+                    </div>
+                    <div class="progress-bar mt-4">
+                        <div class="progress-fill" style="width: 75%"></div>
+                    </div>
+                    <div class="flex justify-between text-xs text-gray-500 mt-1">
+                        <span>0 trees</span>
+                        <span>30 trees goal</span>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mt-6">
+                    <h3 class="font-bold text-lg mb-4">Preferences</h3>
+                    <div class="setting-item">
+                        <div>
+                            <div class="font-medium">Electric Vehicle Mode</div>
+                            <div class="text-xs text-gray-500">Prioritize charging stations</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <div>
+                            <div class="font-medium">Eco Routing</div>
+                            <div class="text-xs text-gray-500">Always suggest green routes</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                    <div class="setting-item">
+                        <div>
+                            <div class="font-medium">Traffic Alerts</div>
+                            <div class="text-xs text-gray-500">Notify about congestion</div>
+                        </div>
+                        <label class="switch">
+                            <input type="checkbox" checked>
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <div class="flex justify-around py-3">
+                    <button class="nav-tab" onclick="showScreen('screen1')">
+                        <i class="nav-icon fas fa-map-marked-alt"></i>
+                        <span>Map</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen4')">
+                        <i class="nav-icon fas fa-star"></i>
+                        <span>Saved</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen7')">
+                        <i class="nav-icon fas fa-history"></i>
+                        <span>History</span>
+                    </button>
+                    <button class="nav-tab active" onclick="showScreen('screen5')">
+                        <i class="nav-icon fas fa-user"></i>
+                        <span>Profile</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Screen 6: Notifications -->
+        <div id="screen6" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Notifications</h1>
+                    <button class="text-white text-xl">
+                        <i class="fas fa-check"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-5 bg-gray-50">
+                <div class="notification-item">
+                    <div class="notification-icon bg-green-100 text-green-600">
+                        <i class="fas fa-leaf"></i>
+                    </div>
+                    <div class="notification-info">
+                        <div class="font-medium">Eco Achievement Unlocked!</div>
+                        <div class="text-sm text-gray-600">You've saved 5kg CO₂ this week. Keep it up!</div>
+                        <div class="notification-time">2 hours ago</div>
+                    </div>
+                </div>
+                
+                <div class="notification-item">
+                    <div class="notification-icon bg-yellow-100 text-yellow-600">
+                        <i class="fas fa-exclamation-triangle"></i>
+                    </div>
+                    <div class="notification-info">
+                        <div class="font-medium">Traffic Alert: Ring Road</div>
+                        <div class="text-sm text-gray-600">Heavy congestion reported on your usual route to work</div>
+                        <div class="notification-time">5 hours ago</div>
+                    </div>
+                </div>
+                
+                <div class="notification-item">
+                    <div class="notification-icon bg-blue-100 text-blue-600">
+                        <i class="fas fa-route"></i>
+                    </div>
+                    <div class="notification-info">
+                        <div class="font-medium">New Eco Route Available</div>
+                        <div class="text-sm text-gray-600">A better route with 15% lower emissions found for your commute</div>
+                        <div class="notification-time">Yesterday</div>
+                    </div>
+                </div>
+                
+                <div class="notification-item">
+                    <div class="notification-icon bg-purple-100 text-purple-600">
+                        <i class="fas fa-trophy"></i>
+                    </div>
+                    <div class="notification-info">
+                        <div class="font-medium">You're in the Top 10%</div>
+                        <div class="text-sm text-gray-600">Your eco-friendly routing places you among Delhi's greenest commuters</div>
+                        <div class="notification-time">2 days ago</div>
+                    </div>
+                </div>
+                
+                <div class="notification-item">
+                    <div class="notification-icon bg-red-100 text-red-600">
+                        <i class="fas fa-wind"></i>
+                    </div>
+                    <div class="notification-info">
+                        <div class="font-medium">Poor Air Quality Alert</div>
+                        <div class="text-sm text-gray-600">High pollution levels expected today. Consider LEAP routes</div>
+                        <div class="notification-time">3 days ago</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <div class="flex justify-around py-3">
+                    <button class="nav-tab" onclick="showScreen('screen1')">
+                        <i class="nav-icon fas fa-map-marked-alt"></i>
+                        <span>Map</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen4')">
+                        <i class="nav-icon fas fa-star"></i>
+                        <span>Saved</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen7')">
+                        <i class="nav-icon fas fa-history"></i>
+                        <span>History</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen5')">
+                        <i class="nav-icon fas fa-user"></i>
+                        <span>Profile</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Screen 7: Trip History -->
+        <div id="screen7" class="screen">
+            <div class="header">
+                <div class="flex justify-between items-center">
+                    <button class="text-white text-xl" onclick="showScreen('screen1')">
+                        <i class="fas fa-arrow-left"></i>
+                    </button>
+                    <h1 class="text-xl font-bold">Trip History</h1>
+                    <button class="text-white text-xl">
+                        <i class="fas fa-calendar"></i>
+                    </button>
+                </div>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-5 bg-gray-50">
+                <div class="mb-4">
+                    <h2 class="text-lg font-bold">Today</h2>
+                    <div class="card mt-2">
+                        <div class="flex justify-between">
+                            <div>
+                                <div class="font-bold">Office to Home</div>
+                                <div class="text-sm text-gray-500">Via Outer Ring Road</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold text-green-600">LEAP Route</div>
+                                <div class="text-sm">45 min • 14 km</div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between mt-2">
+                            <div class="flex items-center">
+                                <i class="fas fa-leaf text-green-500 mr-1"></i>
+                                <span class="text-sm">1.5kg CO₂ saved</span>
+                            </div>
+                            <div class="text-sm">6:15 PM</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h2 class="text-lg font-bold">Yesterday</h2>
+                    <div class="card mt-2">
+                        <div class="flex justify-between">
+                            <div>
+                                <div class="font-bold">Home to Gym</div>
+                                <div class="text-sm text-gray-500">Via Mathura Road</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold text-blue-600">Optimal Route</div>
+                                <div class="text-sm">25 min • 8.5 km</div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between mt-2">
+                            <div class="flex items-center">
+                                <i class="fas fa-leaf text-green-500 mr-1"></i>
+                                <span class="text-sm">0.8kg CO₂ saved</span>
+                            </div>
+                            <div class="text-sm">7:30 PM</div>
+                        </div>
+                    </div>
+                    
+                    <div class="card mt-2">
+                        <div class="flex justify-between">
+                            <div>
+                                <div class="font-bold">Office to Client</div>
+                                <div class="text-sm text-gray-500">Via Barakhamba Road</div>
+                            </div>
+                            <div class="text-right">
+                                <div class="font-bold text-yellow-600">Fastest Route</div>
+                                <div class="text-sm">20 min • 6 km</div>
+                            </div>
+                        </div>
+                        <div class="flex justify-between mt-2">
+                            <div class="flex items-center">
+                                <i class="fas fa-gas-pump text-gray-500 mr-1"></i>
+                                <span class="text-sm">0.7kg CO₂</span>
+                            </div>
+                            <div class="text-sm">2:15 PM</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <h2 class="text-lg font-bold">This Week</h2>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+                        <div class="flex justify-between mb-3">
+                            <div class="font-medium">Total Distance</div>
+                            <div class="font-bold">86 km</div>
+                        </div>
+                        <div class="flex justify-between mb-3">
+                            <div class="font-medium">CO₂ Saved</div>
+                            <div class="font-bold text-green-600">5.2 kg</div>
+                        </div>
+                        <div class="flex justify-between">
+                            <div class="font-medium">Eco Routes</div>
+                            <div class="font-bold">87%</div>
+                        </div>
+                        
+                        <div class="mt-4">
+                            <div class="flex justify-between text-sm mb-1">
+                                <span>Eco Impact</span>
+                                <span>High</span>
+                            </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: 87%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                <div class="flex justify-around py-3">
+                    <button class="nav-tab" onclick="showScreen('screen1')">
+                        <i class="nav-icon fas fa-map-marked-alt"></i>
+                        <span>Map</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen4')">
+                        <i class="nav-icon fas fa-star"></i>
+                        <span>Saved</span>
+                    </button>
+                    <button class="nav-tab active" onclick="showScreen('screen7')">
+                        <i class="nav-icon fas fa-history"></i>
+                        <span>History</span>
+                    </button>
+                    <button class="nav-tab" onclick="showScreen('screen5')">
+                        <i class="nav-icon fas fa-user"></i>
+                        <span>Profile</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global array to store saved routes
+        let savedRoutes = [];
+        let currentSelectedRoute = null;
+        let selectedPriorityType = 'leap';
+        let currentVehicle = 'car'; // Changed default from 'electric' to 'car'
+        let forecastChart = null;
+
+        // Dummy route data
+        const dummyRoutes = {
+            shortest: {
+                name: "Shortest Route",
+                via: "Barakhamba Road",
+                time: "40 min",
+                distance: "11.0 km",
+                aqi: 150,
+                fuel: "1.1 L",
+                co2: "1.7 kg CO₂",
+                impactWidth: 55,
+                badge: "Shortest",
+                badgeClass: "badge-yellow",
+                mapText: "Shortest Route via Barakhamba Road"
+            },
+            fastest: {
+                name: "Fastest Route",
+                via: "Ring Road",
+                time: "38 min",
+                distance: "12.5 km",
+                aqi: 145,
+                fuel: "1.2 L",
+                co2: "1.8 kg CO₂",
+                impactWidth: 60,
+                badge: "Fastest",
+                badgeClass: "badge-yellow",
+                mapText: "Fastest Route via Ring Road"
+            },
+            leap: {
+                name: "LEAP Route",
+                via: "Outer Ring Road",
+                time: "45 min",
+                distance: "14.0 km",
+                aqi: 105,
+                fuel: "1.5 L",
+                co2: "1.5 kg CO₂",
+                impactWidth: 80,
+                badge: "Recommended",
+                badgeClass: "badge-green",
+                mapText: "LEAP Route via Outer Ring Road"
+            },
+            lecr: {
+                name: "LECR Route",
+                via: "Mathura Road",
+                time: "42 min",
+                distance: "13.0 km",
+                aqi: 130,
+                fuel: "1.0 L",
+                co2: "1.2 kg CO₂",
+                impactWidth: 90,
+                badge: "Eco",
+                badgeClass: "badge-blue",
+                mapText: "LECR Route via Mathura Road"
+            },
+            suggested: {
+                name: "Suggested Route",
+                via: "Balanced for Time & Impact",
+                time: "41 min",
+                distance: "13.5 km",
+                aqi: 120,
+                fuel: "1.3 L",
+                co2: "1.4 kg CO₂",
+                impactWidth: 70,
+                badge: "Optimal",
+                badgeClass: "badge-blue",
+                mapText: "Suggested Route for Optimal Balance"
+            }
+        };
+
+        // Dummy list of Delhi places
+        const delhiPlaces = [
+            "India Gate", "Red Fort", "Qutub Minar", "Humayun's Tomb", "Lotus Temple",
+            "Akshardham Temple", "Chandni Chowk", "Connaught Place", "Hauz Khas Village",
+            "Sarojini Nagar Market", "Dilli Haat", "Jantar Mantar", "Agrasen ki Baoli",
+            "National Rail Museum", "Garden of Five Senses", "Lodhi Garden", "Mehrauli Archaeological Park",
+            "Jama Masjid", "Rashtrapati Bhavan", "Parliament House", "Supreme Court of India",
+            "Delhi Zoo", "Purana Qila", "Bangla Sahib Gurudwara", "Select Citywalk",
+            "Ambience Mall Vasant Kunj", "Pacific Mall Tagore Garden", "DLF Avenue Saket",
+            "Khan Market", "Greater Kailash", "Defence Colony", "Vasant Kunj", "Dwarka",
+            "Rohini", "Pitampura", "Lajpat Nagar", "Karol Bagh", "Rajouri Garden",
+            "Civil Lines", "Mayur Vihar", "Noida Sector 18", "Cyber Hub Gurgaon"
+        ].sort();
+
+        // Hotspot data
+        const hotspots = [
+            { id: 'hotspot1', top: '20%', left: '30%' },
+            { id: 'hotspot2', top: '50%', left: '60%' },
+            { id: 'hotspot3', top: '70%', left: '15%' },
+            { id: 'hotspot4', top: '40%', left: '80%' }
+        ];
+
+        // Initialize forecast chart
+        function initForecastChart() {
+            const ctx = document.getElementById('forecastChart').getContext('2d');
+            
+            // Forecast data
+            const forecastData = {
+                hours: ['Now', '+1H', '+2H', '+3H', '+4H', '+5H'],
+                aqi: [125, 140, 130, 115, 105, 95],
+                traffic: [65, 85, 80, 70, 45, 40]
+            };
+            
+            // Create gradient for AQI line
+            const gradient = ctx.createLinearGradient(0, 0, 0, 180);
+            gradient.addColorStop(0, 'rgba(239, 68, 68, 0.3)');
+            gradient.addColorStop(0.5, 'rgba(245, 158, 11, 0.3)');
+            gradient.addColorStop(1, 'rgba(16, 185, 129, 0.3)');
+            
+            // Create chart
+            forecastChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: forecastData.hours,
+                    datasets: [
+                        {
+                            label: 'AQI',
+                            data: forecastData.aqi,
+                            borderColor: '#EF4444',
+                            backgroundColor: gradient,
+                            borderWidth: 3,
+                            pointRadius: 5,
+                            pointBackgroundColor: function(context) {
+                                const value = context.dataset.data[context.dataIndex];
+                                if (value < 100) return '#10B981';
+                                if (value < 150) return '#F59E0B';
+                                return '#EF4444';
+                            },
+                            pointHoverRadius: 7,
+                            tension: 0.3,
+                            fill: true,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'Traffic Index',
+                            data: forecastData.traffic,
+                            borderColor: '#3B82F6',
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 3,
+                            pointRadius: 5,
+                            pointBackgroundColor: '#3B82F6',
+                            pointHoverRadius: 7,
+                            tension: 0.3,
+                            borderDash: [5, 5],
+                            fill: false,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y;
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            min: 30,
+                            max: 170,
+                            grid: {
+                                color: 'rgba(0, 0, 0, 0.05)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value + ' AQI';
+                                },
+                                color: '#EF4444'
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: false,
+                            position: 'right',
+                            min: 0,
+                            max: 100,
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return value + '%';
+                                },
+                                color: '#3B82F6'
+                            }
+                        }
+                    },
+                    animation: {
+                        duration: 1000,
+                        easing: 'easeOutQuart'
+                    }
+                }
+            });
+            
+            // Chart controls
+            document.querySelectorAll('.chart-btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    document.querySelectorAll('.chart-btn').forEach(btn => {
+                        btn.classList.remove('active');
+                    });
+                    this.classList.add('active');
+                    
+                    const metric = this.dataset.metric;
+                    
+                    // Update chart based on selected metric
+                    forecastChart.data.datasets[0].hidden = (metric === 'traffic');
+                    forecastChart.data.datasets[1].hidden = (metric === 'aqi');
+                    
+                    // Update axes
+                    forecastChart.options.scales.y.display = (metric !== 'traffic');
+                    forecastChart.options.scales.y1.display = (metric !== 'aqi');
+                    
+                    forecastChart.update();
+                });
+            });
+        }
+
+        // Update current time
+        function updateCurrentTime() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+            document.getElementById('current-time').textContent = timeString;
+        }
+
+        // Update live data
+        function updateLiveData() {
+            const aqiValueElement = document.getElementById('live-aqi-value');
+            const aqiDotElement = document.getElementById('live-aqi-dot');
+            const trafficTextElement = document.getElementById('live-traffic-text');
+            const trafficDotElement = document.getElementById('live-traffic-dot');
+            const travelTimeElement = document.getElementById('live-travel-time');
+
+            // Simulate main AQI changes
+            const randomAqi = Math.floor(Math.random() * (200 - 50 + 1)) + 50;
+            aqiValueElement.textContent = randomAqi;
+            if (randomAqi < 100) {
+                aqiDotElement.className = 'aqi-dot bg-green-500';
+            } else if (randomAqi < 150) {
+                aqiDotElement.className = 'aqi-dot bg-orange-500';
+            } else {
+                aqiDotElement.className = 'aqi-dot bg-red-500';
+            }
+
+            // Simulate main Traffic changes
+            const trafficLevels = ['Light', 'Moderate', 'Heavy'];
+            const trafficColors = ['traffic-green', 'traffic-yellow', 'traffic-red'];
+            const randomTrafficIndex = Math.floor(Math.random() * trafficLevels.length);
+            trafficTextElement.textContent = `Live Traffic: ${trafficLevels[randomTrafficIndex]}`;
+            trafficDotElement.className = `traffic-light ${trafficColors[randomTrafficIndex]}`;
+
+            // Simulate travel time changes
+            let baseTime = 45;
+            if (trafficLevels[randomTrafficIndex] === 'Heavy') {
+                baseTime += Math.floor(Math.random() * 10) + 5;
+            } else if (trafficLevels[randomTrafficIndex] === 'Light') {
+                baseTime -= Math.floor(Math.random() * 10) + 5;
+                if (baseTime < 30) baseTime = 30;
+            }
+            travelTimeElement.textContent = `${baseTime} min`;
+
+            // Update hotspot data
+            hotspots.forEach(hotspotData => {
+                const hotspotElement = document.getElementById(hotspotData.id);
+                const randomHotspotAqi = Math.floor(Math.random() * (250 - 30 + 1)) + 30;
+                const randomHotspotTrafficIndex = Math.floor(Math.random() * trafficLevels.length);
+
+                // Update AQI color
+                if (randomHotspotAqi < 80) {
+                    hotspotElement.classList.remove('aqi-moderate', 'aqi-poor');
+                    hotspotElement.classList.add('aqi-good');
+                } else if (randomHotspotAqi < 180) {
+                    hotspotElement.classList.remove('aqi-good', 'aqi-poor');
+                    hotspotElement.classList.add('aqi-moderate');
+                } else {
+                    hotspotElement.classList.remove('aqi-good', 'aqi-moderate');
+                    hotspotElement.classList.add('aqi-poor');
+                }
+                
+                // Update Traffic border color
+                hotspotElement.classList.remove('traffic-light', 'traffic-moderate', 'traffic-heavy');
+                hotspotElement.classList.add(`traffic-${trafficLevels[randomHotspotTrafficIndex].toLowerCase()}`);
+
+                // Update size based on severity
+                let size = 25;
+                if (randomHotspotAqi > 150 || trafficLevels[randomHotspotTrafficIndex] === 'Heavy') {
+                    size = 40;
+                } else if (randomHotspotAqi > 100 || trafficLevels[randomHotspotTrafficIndex] === 'Moderate') {
+                    size = 35;
+                }
+                hotspotElement.style.width = `${size}px`;
+                hotspotElement.style.height = `${size}px`;
+                hotspotElement.textContent = `${randomHotspotAqi}`;
+            });
+        }
+
+        // Screen transitions
+        function showScreen(screenId) {
+            const screens = document.querySelectorAll('.screen');
+            screens.forEach(screen => {
+                screen.classList.remove('active');
+                if (screen.id === 'screen0') {
+                    screen.style.transform = 'translateX(100%)';
+                    screen.style.opacity = '0';
+                }
+            });
+            document.getElementById(screenId).classList.add('active');
+            if (screenId === 'screen0') {
+                document.getElementById(screenId).style.transform = 'translateX(0)';
+                document.getElementById(screenId).style.opacity = '1';
+            }
+
+            // Update footer navigation
+            const navTabs = document.querySelectorAll('.nav-tab');
+            navTabs.forEach(tab => tab.classList.remove('active'));
+            if (screenId === 'screen1') {
+                document.querySelector('.nav-tab:nth-child(1)').classList.add('active');
+            } else if (screenId === 'screen4') {
+                document.querySelector('.nav-tab:nth-child(2)').classList.add('active');
+            } else if (screenId === 'screen5') {
+                document.querySelector('.nav-tab:nth-child(4)').classList.add('active');
+            } else if (screenId === 'screen7') {
+                document.querySelector('.nav-tab:nth-child(3)').classList.add('active');
+            }
+            
+            // Update inputs when switching screens
+            if (screenId === 'screen2') {
+                const destination1 = document.getElementById('destination-input').value;
+                document.getElementById('destination-input-2').value = destination1;
+                hideSuggestions('suggestions1');
+            }
+            if (screenId === 'screen3') {
+                const destination2 = document.getElementById('destination-input-2').value;
+                document.getElementById('route-destination-display').textContent = destination2;
+                
+                let defaultRouteId = selectedPriorityType;
+                if (!dummyRoutes[defaultRouteId]) {
+                    defaultRouteId = 'leap'; 
+                }
+                selectRoute(document.querySelector(`[data-route-id="${defaultRouteId}"]`), defaultRouteId);
+
+                const recommendationBadges = document.querySelectorAll('.route-recommendation-badge');
+                recommendationBadges.forEach(badge => {
+                    const parentCard = badge.closest('.card');
+                    const routeId = parentCard.dataset.routeId;
+                    if (routeId === selectedPriorityType) {
+                        badge.textContent = 'Recommended';
+                        badge.classList.remove('badge-yellow', 'badge-blue');
+                        badge.classList.add('badge-green');
+                    } else {
+                        const originalRouteData = dummyRoutes[routeId];
+                        badge.textContent = originalRouteData.badge;
+                        badge.className = `badge ${originalRouteData.badgeClass} route-recommendation-badge`;
+                    }
+                });
+                hideSuggestions('suggestions2');
+            }
+        }
+
+        // Vehicle selection
+        function selectVehicle(selectedElement, vehicleType) {
+            const vehicleOptions = document.querySelectorAll('.vehicle-option');
+            vehicleOptions.forEach(option => {
+                option.classList.remove('selected');
+            });
+            selectedElement.classList.add('selected');
+            currentVehicle = vehicleType;
+            console.log('Selected Vehicle:', vehicleType);
+        }
+
+        // Priority selection
+        function selectPriorityOption(selectedElement, priorityType) {
+            const priorityOptions = document.querySelectorAll('.priority-option');
+            priorityOptions.forEach(option => {
+                option.classList.remove('selected');
+            });
+            selectedElement.classList.add('selected');
+            selectedPriorityType = priorityType;
+            console.log('Selected Priority:', selectedPriorityType);
+        }
+
+        // Find routes
+        function findRoutes() {
+            const findRoutesText = document.getElementById('find-routes-text');
+            const findingRoutesSpinner = document.getElementById('finding-routes');
+            const findRoutesButton = document.querySelector('#screen2 .button-primary');
+
+            findRoutesText.classList.add('hidden');
+            findingRoutesSpinner.classList.remove('hidden');
+            findRoutesButton.classList.remove('pulse');
+            findRoutesButton.disabled = true;
+
+            setTimeout(() => {
+                findRoutesText.classList.remove('hidden');
+                findingRoutesSpinner.classList.add('hidden');
+                findRoutesButton.classList.add('pulse');
+                findRoutesButton.disabled = false;
+                showScreen('screen3');
+            }, 2000);
+        }
+
+        // Route selection
+        function selectRoute(selectedElement, routeId) {
+            const routeCards = document.querySelectorAll('#screen3 .card');
+            routeCards.forEach(card => {
+                card.classList.remove('selected');
+            });
+            selectedElement.classList.add('selected');
+            currentSelectedRoute = dummyRoutes[routeId];
+            console.log('Selected Route:', routeId, currentSelectedRoute);
+
+            // Update map visualization
+            const routeVisualization = document.getElementById('route-visualization');
+            routeVisualization.innerHTML = `
+                <div class="route-step" style="top: 40%; left: 20%;"></div>
+                <div class="route-step" style="top: 60%; left: 80%;"></div>
+                <div class="route-path" style="top: 40%; left: 20%; width: 60%; transform: rotate(${Math.random() * 30}deg);"></div>
+                <div class="route-info-window" style="top: ${30 + Math.random() * 20}%; left: ${40 + Math.random() * 20}%;">
+                    <div class="font-semibold">${routeId === 'leap' ? 'Green Zone' : 'Route Point'}</div>
+                    <div class="text-xs">${routeId === 'leap' ? 'Low Pollution Area' : 'Traffic: Moderate'}</div>
+                </div>
+            `;
+        }
+
+        // Show toast message
+        function showToast(message) {
+            const toast = document.getElementById('toast-message');
+            toast.textContent = message;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // Save route
+        function saveSelectedRoute() {
+            if (currentSelectedRoute) {
+                const isAlreadySaved = savedRoutes.some(route => 
+                    route.name === currentSelectedRoute.name && 
+                    route.via === currentSelectedRoute.via
+                );
+
+                if (!isAlreadySaved) {
+                    savedRoutes.push(currentSelectedRoute);
+                    showToast('Route saved successfully!');
+                } else {
+                    showToast('This route is already saved!');
+                }
+            } else {
+                showToast('Please select a route first!');
+            }
+        }
+
+        // Share route
+        function shareRoute(routeName) {
+            showToast(`Sharing route: ${routeName}`);
+            // In a real app, this would trigger the native sharing dialog
+        }
+
+        // Navigate to route
+        function navigateToRoute(routeId) {
+            showToast(`Navigating to ${dummyRoutes[routeId].name}`);
+            showScreen('screen1');
+        }
+
+        // Delete route
+        function deleteRoute(element) {
+            const card = element.closest('.card');
+            card.classList.add('opacity-0');
+            setTimeout(() => {
+                card.remove();
+                if (document.querySelectorAll('#saved-routes-list .card').length === 0) {
+                    document.getElementById('no-saved-routes-message').style.display = 'block';
+                }
+            }, 300);
+        }
+
+        // Autocomplete functions
+        function showSuggestions(inputElement, suggestionsContainerId) {
+            const query = inputElement.value.toLowerCase();
+            const suggestionsContainer = document.getElementById(suggestionsContainerId);
+            suggestionsContainer.innerHTML = '';
+
+            if (query.length === 0) {
+                suggestionsContainer.classList.add('hidden');
+                return;
+            }
+
+            const filteredPlaces = delhiPlaces.filter(place => 
+                place.toLowerCase().includes(query)
+            );
+
+            if (filteredPlaces.length > 0) {
+                filteredPlaces.forEach(place => {
+                    const suggestionItem = document.createElement('div');
+                    suggestionItem.classList.add('autocomplete-suggestion-item');
+                    suggestionItem.textContent = place;
+                    suggestionItem.onmousedown = (event) => {
+                        event.preventDefault();
+                        selectSuggestion(inputElement, place, suggestionsContainerId);
+                    };
+                    suggestionsContainer.appendChild(suggestionItem);
+                });
+                suggestionsContainer.classList.remove('hidden');
+            } else {
+                suggestionsContainer.classList.add('hidden');
+            }
+        }
+
+        function selectSuggestion(inputElement, selectedPlace, suggestionsContainerId) {
+            inputElement.value = selectedPlace;
+            document.getElementById(suggestionsContainerId).classList.add('hidden');
+        }
+
+        function hideSuggestions(suggestionsContainerId) {
+            setTimeout(() => {
+                document.getElementById(suggestionsContainerId).classList.add('hidden');
+            }, 100);
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('destination-input').value = "India Gate";
+            document.getElementById('destination-input-2').value = "India Gate";
+            updateCurrentTime();
+            updateLiveData();
+            initForecastChart();
+            setInterval(updateCurrentTime, 60000);
+            setInterval(updateLiveData, 10000);
+            
+            // Set initial route visualization
+            selectRoute(document.querySelector('[data-route-id="leap"]'), 'leap');
+        });
+    </script>
+</body>
+</html>
